@@ -292,6 +292,9 @@ class MusicScannerWithTasks(tk.Tk):
         self.path_a_var = tk.StringVar()
         self.path_b_var = tk.StringVar()
 
+        # 并发线程数（用于读取时长/计算MD5，默认32，范围1~32）
+        self.worker_count_var = tk.IntVar(value=32)
+
         # 扫描结果数据
         self.duplicate_groups = []
         self.similar_groups = []
@@ -300,6 +303,7 @@ class MusicScannerWithTasks(tk.Tk):
         self.all_files_b = {}
         self.change_results = []
         self.checked_items = {}  # id(tree) -> set(iid)
+        self._scan_diagnosis = {}  # folder_type -> 诊断信息（路径存在但扫描为空时用）
 
         # 线程锁和进度事件
         self._scan_state_lock = threading.Lock()
@@ -756,6 +760,19 @@ class MusicScannerWithTasks(tk.Tk):
                    self.clear_trash,
                    "永久删除 AppTrash 回收站中的所有文件（不可恢复）", width=14)
 
+        # 并发线程数控制（读取时长/计算MD5用）
+        worker_frame = tk.Frame(container, bg=self.colors['card'])
+        worker_frame.pack(pady=(5, 0), anchor='center')
+        inner = tk.Frame(worker_frame, bg=self.colors['card'])
+        inner.pack(anchor='center')
+        tk.Label(inner, text="⚙️ 并发线程数:", bg=self.colors['card'],
+                fg=self.colors['text'], font=('Segoe UI', 9)).pack(side=tk.LEFT)
+        worker_spin = tk.Spinbox(inner, from_=1, to=32, width=5,
+                                 textvariable=self.worker_count_var,
+                                 font=('Segoe UI', 9), justify='center')
+        worker_spin.pack(side=tk.LEFT, padx=(5, 0))
+        Tooltip(worker_spin, "控制读取音频时长和计算MD5时的并行线程数（1~32，默认32）。SSD建议16~32，机械硬盘建议2~4。")
+
     def _fill_quick_action_panel(self, quick_frame):
         """填充快速选择面板（V14：上4按钮+下并排）"""
         container = tk.Frame(quick_frame, bg=self.colors['card'])
@@ -1054,9 +1071,10 @@ class MusicScannerWithTasks(tk.Tk):
         import json
         session = {
             'last_task_id': self.current_task.task_id if self.current_task else None,
-            'folder_a': self.path_a_var.get(),
-            'folder_b': self.path_b_var.get(),
+            'folder_a': self.path_a_var.get().strip(),
+            'folder_b': self.path_b_var.get().strip(),
             'scan_options': {k: v.get() for k, v in self.scan_options.items()},
+            'worker_count': self.worker_count_var.get(),
         }
         session_path = get_app_dir() / "last_session.json"
         try:
@@ -1083,8 +1101,17 @@ class MusicScannerWithTasks(tk.Tk):
                 self.scan_options[key].set(val)
 
         # 恢复路径
-        self.path_a_var.set(session.get('folder_a', ''))
-        self.path_b_var.set(session.get('folder_b', ''))
+        self.path_a_var.set(session.get('folder_a', '').strip())
+        self.path_b_var.set(session.get('folder_b', '').strip())
+
+        # 恢复并发线程数（校验范围 1~32）
+        wc = session.get('worker_count', 32)
+        try:
+            wc = int(wc)
+        except (ValueError, TypeError):
+            wc = 32
+        wc = max(1, min(32, wc))
+        self.worker_count_var.set(wc)
 
         # 恢复当前任务
         last_task_id = session.get('last_task_id')
@@ -1247,11 +1274,23 @@ class MusicScannerWithTasks(tk.Tk):
         if not self.scan_options['scan_folder_a'].get() and not self.scan_options['scan_folder_b'].get():
             return False, "请至少选择一个要扫描的文件夹（A或B）"
 
-        if self.scan_options['scan_folder_a'].get() and not self.path_a_var.get():
-            return False, "已选择扫描文件夹A，但未指定路径"
+        if self.scan_options['scan_folder_a'].get():
+            path_a = self.path_a_var.get().strip()
+            if not path_a:
+                return False, "已选择扫描文件夹A，但未指定路径"
+            if not os.path.exists(path_a):
+                return False, f"文件夹A路径不存在：\n{path_a}\n\n请检查路径或点击「浏览...」重新选择。"
+            if not os.path.isdir(path_a):
+                return False, f"文件夹A路径不是目录：\n{path_a}\n\n请选择有效的文件夹。"
 
-        if self.scan_options['scan_folder_b'].get() and not self.path_b_var.get():
-            return False, "已选择扫描文件夹B，但未指定路径"
+        if self.scan_options['scan_folder_b'].get():
+            path_b = self.path_b_var.get().strip()
+            if not path_b:
+                return False, "已选择扫描文件夹B，但未指定路径"
+            if not os.path.exists(path_b):
+                return False, f"文件夹B路径不存在：\n{path_b}\n\n请检查路径或点击「浏览...」重新选择。"
+            if not os.path.isdir(path_b):
+                return False, f"文件夹B路径不是目录：\n{path_b}\n\n请选择有效的文件夹。"
 
         # 防御性检查：扫描模式不能为空
         if not self.scan_options['full_scan'].get() and not self.scan_options['incremental'].get():
@@ -1321,8 +1360,8 @@ class MusicScannerWithTasks(tk.Tk):
             if not name:
                 return
 
-            folder_a = self.path_a_var.get()
-            folder_b = self.path_b_var.get()
+            folder_a = self.path_a_var.get().strip()
+            folder_b = self.path_b_var.get().strip()
 
             if not folder_a and not folder_b:
                 messagebox.showwarning("提示", "请至少选择一个文件夹")
@@ -1354,8 +1393,11 @@ class MusicScannerWithTasks(tk.Tk):
         """将 UI 中当前路径同步到 current_task 并持久化（用户在路径框编辑或浏览后调用）"""
         if not self.current_task:
             return
-        folder_a = self.path_a_var.get()
-        folder_b = self.path_b_var.get()
+        folder_a = self.path_a_var.get().strip()
+        folder_b = self.path_b_var.get().strip()
+        # 去除路径两端空白后写回 UI（防止隐藏空格导致扫描失败）
+        self.path_a_var.set(folder_a)
+        self.path_b_var.set(folder_b)
         if (self.current_task.folder_a != folder_a or
                 self.current_task.folder_b != folder_b):
             self.task_manager.update_task(
@@ -1774,6 +1816,33 @@ class MusicScannerWithTasks(tk.Tk):
         finally:
             self._scan_progress_event.set()
 
+    def _show_scan_diagnosis_if_any(self):
+        """若某文件夹路径存在但扫描到 0 个支持的音频文件，主动弹窗提示用户"""
+        diag = getattr(self, '_scan_diagnosis', {})
+        if not diag:
+            return
+        lines = []
+        for ft in ('A', 'B'):
+            info = diag.get(ft)
+            if not info:
+                continue
+            lines.append(f"📁 文件夹 {ft}: {info['path']}")
+            lines.append(f"   存在: {'是' if info['isdir'] else '否（不是目录）'}")
+            lines.append(f"   遍历目录数: {info['walked_dirs']}")
+            lines.append(f"   匹配音频文件: 0")
+            lines.append(f"   非音频文件数: {info['skipped_ext']}")
+            if info['top_skipped']:
+                ext_text = ', '.join(f"{ext}({cnt})" for ext, cnt in info['top_skipped'])
+                lines.append(f"   最常见扩展名: {ext_text}")
+            if info['stat_failed']:
+                lines.append(f"   无法读取文件数: {info['stat_failed']}")
+        messagebox.showinfo(
+            "扫描诊断",
+            "以下文件夹路径存在，但没有找到支持的音频文件（.mp3/.flac/.wav/.aac/.ogg/.m4a/.wma）：\n\n"
+            + '\n'.join(lines)
+        )
+        self._scan_diagnosis.clear()
+
     def _poll_scan_progress(self):
         """主线程轮询更新进度弹窗（事件驱动 + 100ms fallback）"""
         if not hasattr(self, 'scan_progress_dialog') or not self.scan_progress_dialog.winfo_exists():
@@ -1811,6 +1880,8 @@ class MusicScannerWithTasks(tk.Tk):
                     f"扫描耗时: {dur}"
                 )
                 self.show_scan_result_dialog(result_msg)
+
+                self._show_scan_diagnosis_if_any()
             return
 
         self._scan_progress_event.wait(0.1)
@@ -1819,10 +1890,35 @@ class MusicScannerWithTasks(tk.Tk):
     def scan_directory(self, path: str, folder_type: str) -> Dict[str, dict]:
         """扫描目录获取文件列表（不立即读取音频时长，延迟到检测变更后按需读取）"""
         files = {}
-        if not path or not os.path.exists(path):
+        path = path.strip()
+
+        # 调试日志：帮助定位文件夹 B 扫描为 0 的问题
+        debug_log = os.path.join(get_app_dir(), 'scan_debug.log')
+        def _log(msg):
+            try:
+                with open(debug_log, 'a', encoding='utf-8') as f:
+                    f.write(f"[{datetime.now().isoformat()}] [{folder_type}] {msg}\n")
+            except Exception:
+                pass
+
+        _log(f"scan_directory called path={repr(path)}")
+        if not path:
+            _log("empty path, returning 0")
+            return files
+        exists = os.path.exists(path)
+        isdir = os.path.isdir(path)
+        _log(f"exists={exists} isdir={isdir}")
+        if not exists:
+            _log("path not exists, returning 0")
             return files
 
+        matched = 0
+        skipped_ext = 0
+        stat_failed = 0
+        walked_dirs = 0
+        skipped_ext_samples = {}
         for root, _, filenames in os.walk(path):
+            walked_dirs += 1
             for filename in filenames:
                 if filename.lower().endswith(('.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma')):
                     full_path = os.path.join(root, filename)
@@ -1837,8 +1933,33 @@ class MusicScannerWithTasks(tk.Tk):
                             'duration': None,
                         }
                         files[full_path] = info
-                    except (OSError, IOError):
-                        continue
+                        matched += 1
+                    except (OSError, IOError) as e:
+                        stat_failed += 1
+                        _log(f"stat failed: {repr(full_path)} error={e}")
+                else:
+                    skipped_ext += 1
+                    ext = os.path.splitext(filename)[1].lower() or '(no ext)'
+                    skipped_ext_samples[ext] = skipped_ext_samples.get(ext, 0) + 1
+            if walked_dirs <= 5:
+                _log(f"walked dir {walked_dirs}: {repr(root)} files={len(filenames)}")
+        top_skipped = sorted(skipped_ext_samples.items(), key=lambda x: -x[1])[:10]
+        _log(f"done matched={matched} skipped_ext={skipped_ext} stat_failed={stat_failed} walked_dirs={walked_dirs}")
+        _log(f"top skipped extensions: {top_skipped}")
+
+        # 保存诊断信息：路径存在但扫描到 0 个音频文件时，帮助用户定位原因
+        if exists and matched == 0:
+            self._scan_diagnosis[folder_type] = {
+                'path': path,
+                'isdir': isdir,
+                'walked_dirs': walked_dirs,
+                'skipped_ext': skipped_ext,
+                'stat_failed': stat_failed,
+                'top_skipped': top_skipped,
+            }
+        else:
+            self._scan_diagnosis.pop(folder_type, None)
+
         return files
 
     def _apply_cached_durations(self, files: Dict[str, dict], changes: List[FileState]):
@@ -1847,16 +1968,35 @@ class MusicScannerWithTasks(tk.Tk):
             if c.path in files and c.duration is not None:
                 files[c.path]['duration'] = c.duration
 
-    def _read_durations(self, files: Dict[str, dict]):
-        """按需读取音频时长，仅当启用时长过滤时执行"""
+    def _read_durations(self, files: Dict[str, dict], progress_callback=None):
+        """按需读取音频时长，仅当启用时长过滤时执行（多线程并行）"""
         if not self.scan_options['use_duration'].get():
             return
-        for path, info in files.items():
-            if info.get('duration') is None:
-                try:
-                    info['duration'] = get_audio_duration(path)
-                except Exception:
-                    info['duration'] = None
+
+        paths = [p for p, info in files.items() if info.get('duration') is None]
+        if not paths:
+            return
+
+        total = len(paths)
+        workers = max(1, min(32, self.worker_count_var.get()))
+
+        def _worker(i_path):
+            idx, path = i_path
+            try:
+                duration = get_audio_duration(path)
+            except Exception:
+                duration = None
+            if progress_callback and total > 0:
+                progress_callback(35 + int(15 * (idx + 1) / total),
+                                  f"正在读取音频时长 ({idx + 1}/{total})...")
+            return path, duration
+
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            results = list(ex.map(_worker, enumerate(paths)))
+
+        for path, duration in results:
+            if path in files:
+                files[path]['duration'] = duration
 
     def _apply_cached_md5(self, files: Dict[str, dict], changes: List[FileState]):
         """将历史缓存的 MD5 透传到当前文件字典（未变更/移动文件）"""
@@ -1879,7 +2019,8 @@ class MusicScannerWithTasks(tk.Tk):
                                   f"正在计算 MD5 ({idx + 1}/{total})...")
             return path, md5
 
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        workers = max(1, min(32, self.worker_count_var.get()))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
             results = list(ex.map(_worker, enumerate(paths)))
 
         for path, md5 in results:
@@ -1897,6 +2038,19 @@ class MusicScannerWithTasks(tk.Tk):
 
         # 确保 current_task 路径与 UI 一致（外部直接调用 perform_scan 时也要同步）
         self._sync_task_paths()
+
+        # 调试日志：记录本次扫描配置与路径
+        debug_log = os.path.join(get_app_dir(), 'scan_debug.log')
+        def _debug(msg):
+            try:
+                with open(debug_log, 'a', encoding='utf-8') as f:
+                    f.write(f"[{datetime.now().isoformat()}] [SCAN] {msg}\n")
+            except Exception:
+                pass
+        task_id = self.current_task.task_id if self.current_task else None
+        _debug(f"perform_scan task_id={task_id} scan_config={scan_config}")
+        if self.current_task:
+            _debug(f"current_task.folder_a={repr(self.current_task.folder_a)} folder_b={repr(self.current_task.folder_b)}")
 
         def _report(pct: int, msg: str):
             if progress_callback:
@@ -1973,7 +2127,7 @@ class MusicScannerWithTasks(tk.Tk):
             files_to_read_duration_a = files_to_process_a
             files_to_read_duration_b = files_to_process_b
 
-        self._read_durations({**files_to_read_duration_a, **files_to_read_duration_b})
+        self._read_durations({**files_to_read_duration_a, **files_to_read_duration_b}, progress_callback=_report)
 
         # 4. 计算 MD5：应用缓存 + 多线程仅计算新增/修改文件
         _report(50, "正在计算 MD5...")
@@ -2107,8 +2261,14 @@ class MusicScannerWithTasks(tk.Tk):
         a_mod = stats_a.get('modified', 0) if stats_a else 0
         b_new = stats_b.get('new', 0) if stats_b else 0
         b_mod = stats_b.get('modified', 0) if stats_b else 0
-        self.a_stats_var.set(f"📀 {len(self.all_files_a)} 个文件")
-        self.b_stats_var.set(f"📀 {len(self.all_files_b)} 个文件")
+        if scan_config.get('scan_folder_a'):
+            self.a_stats_var.set(f"📀 {len(self.all_files_a)} 个文件")
+        else:
+            self.a_stats_var.set("📀 未选择扫描")
+        if scan_config.get('scan_folder_b'):
+            self.b_stats_var.set(f"📀 {len(self.all_files_b)} 个文件")
+        else:
+            self.b_stats_var.set("📀 未选择扫描")
         self.a_change_var.set(f"🟢 新增: {a_new}  🟡 修改: {a_mod}")
         self.b_change_var.set(f"🟢 新增: {b_new}  🟡 修改: {b_mod}")
 
@@ -2694,6 +2854,7 @@ class MusicScannerWithTasks(tk.Tk):
                 self.update_task_display()
                 self.refresh_results(self._last_scan_config, self._last_stats_a,
                                      self._last_stats_b, self._last_duration)
+                self._show_scan_diagnosis_if_any()
             return
         self._scan_progress_event.wait(0.1)
         self.after(100, self._poll_refresh_progress)

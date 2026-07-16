@@ -10,6 +10,7 @@ build/
 tasks.db
 AppTrash/
 last_session.json
+scan_debug.log
 git/
 
 # IDE
