@@ -212,7 +212,7 @@ class TaskManager:
         """
         更新任务信息（单条 UPDATE 合并多个字段）
         """
-        allowed_fields = {'task_name', 'total_files_a', 'total_files_b', 'status', 'scan_count'}
+        allowed_fields = {'task_name', 'folder_a', 'folder_b', 'total_files_a', 'total_files_b', 'status', 'scan_count'}
         present = {k: v for k, v in kwargs.items() if k in allowed_fields}
         if not present:
             return

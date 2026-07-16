@@ -1350,6 +1350,21 @@ class MusicScannerWithTasks(tk.Tk):
         else:
             self.task_info_var.set("当前任务: 无")
 
+    def _sync_task_paths(self):
+        """将 UI 中当前路径同步到 current_task 并持久化（用户在路径框编辑或浏览后调用）"""
+        if not self.current_task:
+            return
+        folder_a = self.path_a_var.get()
+        folder_b = self.path_b_var.get()
+        if (self.current_task.folder_a != folder_a or
+                self.current_task.folder_b != folder_b):
+            self.task_manager.update_task(
+                self.current_task.task_id,
+                folder_a=folder_a,
+                folder_b=folder_b
+            )
+            self.current_task = self.task_manager.get_task(self.current_task.task_id)
+
     def load_existing_task(self):
         """加载已有任务"""
         tasks = self.task_manager.list_tasks()
@@ -1659,6 +1674,9 @@ class MusicScannerWithTasks(tk.Tk):
             )
             self.update_task_display()
 
+        # 同步 UI 路径到当前任务（用户在路径框编辑或浏览后，确保扫描使用最新路径）
+        self._sync_task_paths()
+
         # 获取扫描配置
         scan_config = self.get_effective_scan_config()
         scan_type = ScanType(scan_config['scan_mode'])
@@ -1876,6 +1894,9 @@ class MusicScannerWithTasks(tk.Tk):
         """执行扫描 - 支持只扫描单一文件夹和进度回调"""
         if scan_config is None:
             scan_config = self.get_effective_scan_config()
+
+        # 确保 current_task 路径与 UI 一致（外部直接调用 perform_scan 时也要同步）
+        self._sync_task_paths()
 
         def _report(pct: int, msg: str):
             if progress_callback:

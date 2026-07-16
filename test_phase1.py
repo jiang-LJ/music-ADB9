@@ -94,10 +94,13 @@ class TestTaskManagerCRUD:
         task = manager.create_task("更新测试", "/a", "/b")
         old_count = task.scan_count
         time.sleep(0.01)  # 确保时间戳变化
-        manager.update_task(task.task_id, scan_count=5, status="completed")
+        manager.update_task(task.task_id, scan_count=5, status="completed",
+                            folder_a="/new/a", folder_b="/new/b")
         updated = manager.get_task(task.task_id)
         assert updated.scan_count == 5
         assert updated.status == "completed"
+        assert updated.folder_a == "/new/a"
+        assert updated.folder_b == "/new/b"
         assert updated.updated_at >= task.updated_at
 
     def test_update_task_ignore_invalid_field(self, manager):

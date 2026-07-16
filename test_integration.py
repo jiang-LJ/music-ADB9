@@ -405,6 +405,27 @@ class TestIntegration:
         # 只有修改过的文件需要重新计算 MD5
         assert call_count['n'] == 1
 
+    def test_task_path_sync(self, app):
+        """I-015: 用户在 UI 修改路径后，同步更新 current_task 并持久化"""
+        app_obj, tmp_path = app
+        folder_a = self._make_music_files(tmp_path, "A", {"song1.mp3": b"x"})
+        folder_b = self._make_music_files(tmp_path, "B", {"song2.mp3": b"y"})
+        app_obj.path_a_var.set(folder_a)
+        app_obj.path_b_var.set(folder_b)
+        app_obj.current_task = app_obj.task_manager.create_task("I015", folder_a, folder_b)
+
+        # 修改 UI 中的 B 路径
+        new_b = self._make_music_files(tmp_path, "B2", {"song3.mp3": b"z"})
+        app_obj.path_b_var.set(new_b)
+
+        # 调用同步方法
+        app_obj._sync_task_paths()
+
+        assert app_obj.current_task.folder_b == new_b
+        # 验证数据库也更新了
+        task = app_obj.task_manager.get_task(app_obj.current_task.task_id)
+        assert task.folder_b == new_b
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
