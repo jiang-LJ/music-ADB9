@@ -796,15 +796,15 @@ class MusicScannerWithTasks(tk.Tk):
             top_frame.grid_rowconfigure(i, weight=1)
             top_frame.grid_columnconfigure(i, weight=1)
 
-        btn_qa = tk.Button(top_frame, text="选A重复",
-                           command=lambda: self.quick_select('dup', 'A'), **btn_cfg)
+        btn_qa = tk.Button(top_frame, text="一键选A",
+                           command=lambda: self.quick_select(self.result_view_type, 'A'), **btn_cfg)
         btn_qa.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
-        Tooltip(btn_qa, "在重复文件结果中一键选中所有文件夹A的文件")
+        Tooltip(btn_qa, "在当前视图（重复/相似/近似）中一键选中所有文件夹A的文件")
 
-        btn_qb = tk.Button(top_frame, text="选B重复",
-                           command=lambda: self.quick_select('dup', 'B'), **btn_cfg)
+        btn_qb = tk.Button(top_frame, text="一键选B",
+                           command=lambda: self.quick_select(self.result_view_type, 'B'), **btn_cfg)
         btn_qb.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
-        Tooltip(btn_qb, "在重复文件结果中一键选中所有文件夹B的文件")
+        Tooltip(btn_qb, "在当前视图（重复/相似/近似）中一键选中所有文件夹B的文件")
 
         btn_sim = tk.Button(top_frame, text="相似去重",
                             command=self.select_smallest_in_similar, **btn_cfg)
