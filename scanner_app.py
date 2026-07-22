@@ -234,10 +234,9 @@ HELP_CONTENT = """
     ※ 四者严格互斥，相加等于总文件数
 
 【快速选择】
-  • 选 A 重复：在重复文件结果中一键选中所有位于文件夹 A 的文件
-  • 选 B 重复：在重复文件结果中一键选中所有位于文件夹 B 的文件
-  • 相似去重：保留每组最大/最新的文件，其余全部勾选（A+B 都有时优先保留 A 侧）
-  • 近似去重：保留每组最大/最新的文件，其余全部勾选（A+B 都有时优先保留 A 侧）
+  • 一键选A / 一键选B：在当前视图（重复/相似/近似）中一键选中所有对应文件夹的文件
+  • 智选去重：根据下方勾选的筛选条件，在每组中智能保留最优文件（权重：最大时长 > 最大文件 > 最新文件），其余勾选
+  • 最大时长 / 最大文件 / 最新文件：智选去重的筛选条件，可单选或多选
   • 取消选择：清空所有已勾选的文件
   • 统计：实时显示当前已勾选文件的总数，以及 A 侧和 B 侧各勾选了多少个
 
@@ -294,6 +293,11 @@ class MusicScannerWithTasks(tk.Tk):
 
         # 并发线程数（用于读取时长/计算MD5，默认32，范围1~32）
         self.worker_count_var = tk.IntVar(value=32)
+
+        # 智选去重筛选条件（默认全选）
+        self.smart_use_duration = tk.BooleanVar(value=True)
+        self.smart_use_size = tk.BooleanVar(value=True)
+        self.smart_use_mtime = tk.BooleanVar(value=True)
 
         # 扫描结果数据
         self.duplicate_groups = []
@@ -774,7 +778,7 @@ class MusicScannerWithTasks(tk.Tk):
         Tooltip(worker_spin, "控制读取音频时长和计算MD5时的并行线程数（1~32，默认32）。SSD建议16~32，机械硬盘建议2~4。")
 
     def _fill_quick_action_panel(self, quick_frame):
-        """填充快速选择面板（V14：上4按钮+下并排）"""
+        """填充快速选择面板（V17：智选去重+三条件勾选）"""
         container = tk.Frame(quick_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=3)
 
@@ -789,13 +793,15 @@ class MusicScannerWithTasks(tk.Tk):
             relief='raised', bd=1
         )
 
-        # ===== 上半区：4个按钮 2×2 =====
+        # ===== 上半区：一键选A/B + 智选去重 + 筛选条件 =====
         top_frame = tk.Frame(container, bg=self.colors['card'])
         top_frame.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
-        for i in range(2):
+        for i in range(3):
             top_frame.grid_rowconfigure(i, weight=1)
-            top_frame.grid_columnconfigure(i, weight=1)
+        top_frame.grid_columnconfigure(0, weight=1)
+        top_frame.grid_columnconfigure(1, weight=1)
 
+        # Row 0: 一键选A / 一键选B
         btn_qa = tk.Button(top_frame, text="一键选A",
                            command=lambda: self.quick_select(self.result_view_type, 'A'), **btn_cfg)
         btn_qa.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
@@ -806,15 +812,33 @@ class MusicScannerWithTasks(tk.Tk):
         btn_qb.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
         Tooltip(btn_qb, "在当前视图（重复/相似/近似）中一键选中所有文件夹B的文件")
 
-        btn_sim = tk.Button(top_frame, text="相似去重",
-                            command=self.select_smallest_in_similar, **btn_cfg)
-        btn_sim.grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
-        Tooltip(btn_sim, "保留每组最大/最新的文件，其余全部勾选")
+        # Row 1: 智选去重（跨2列）
+        btn_smart = tk.Button(top_frame, text="智选去重",
+                              command=self.smart_select, **btn_cfg)
+        btn_smart.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky='nsew')
+        Tooltip(btn_smart, "根据下方勾选的条件，在每组中智能保留最优文件，其余勾选")
 
-        btn_approx = tk.Button(top_frame, text="近似去重",
-                               command=self.select_smallest_in_approximate, **btn_cfg)
-        btn_approx.grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
-        Tooltip(btn_approx, "保留每组最大/最新的文件，其余全部勾选")
+        # Row 2: 三个筛选条件复选框（横排）
+        cond_frame = tk.Frame(top_frame, bg=self.colors['card'])
+        cond_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=10, pady=(0, 8))
+        cond_frame.grid_columnconfigure(0, weight=1)
+        cond_frame.grid_columnconfigure(1, weight=1)
+        cond_frame.grid_columnconfigure(2, weight=1)
+
+        cb_cfg = dict(
+            bg=self.colors['card'], fg=self.colors['text'],
+            font=('Segoe UI', 9), cursor='hand2',
+            selectcolor=self.colors['card'],
+            activebackground=self.colors['card'],
+            activeforeground=self.colors['text']
+        )
+
+        tk.Checkbutton(cond_frame, text="最大时长", variable=self.smart_use_duration,
+                       **cb_cfg).grid(row=0, column=0, sticky='w')
+        tk.Checkbutton(cond_frame, text="最大文件", variable=self.smart_use_size,
+                       **cb_cfg).grid(row=0, column=1, sticky='w')
+        tk.Checkbutton(cond_frame, text="最新文件", variable=self.smart_use_mtime,
+                       **cb_cfg).grid(row=0, column=2, sticky='w')
 
         # ===== 下半区：取消选择 | 统计 =====
         bottom_frame = tk.Frame(container, bg=self.colors['card'])
@@ -2543,9 +2567,28 @@ class MusicScannerWithTasks(tk.Tk):
                     self.checked_items[id(target)].add(item)
         self.update_selection_stats()
 
-    def _select_smallest_in_groups(self, groups: list, view_type: str):
-        """每组保留最大/最新的文件不选，其余全部勾选"""
-        self.switch_result_view(view_type)
+
+    def smart_select(self):
+        """智选去重：根据勾选的筛选条件（时长最大>文件最大>最新文件）决定每组保留哪个文件"""
+        vt = self.result_view_type
+        if vt == 'sim':
+            groups = self.similar_groups
+        elif vt == 'approx':
+            groups = self.approximate_groups
+        else:
+            return  # 'all' 或 'dup' 时不操作
+
+        if not groups:
+            return
+
+        use_duration = self.smart_use_duration.get()
+        use_size = self.smart_use_size.get()
+        use_mtime = self.smart_use_mtime.get()
+
+        if not any([use_duration, use_size, use_mtime]):
+            return
+
+        self.switch_result_view(vt)
         trees = [self.result_tree_a, self.result_tree_b]
 
         # 清空所有勾选
@@ -2561,69 +2604,49 @@ class MusicScannerWithTasks(tk.Tk):
         for group in groups:
             a_items = [(p, i) for p, i in group if p in self.all_files_a]
             b_items = [(p, i) for p, i in group if p in self.all_files_b]
+            all_items = a_items + b_items
+            if not all_items:
+                continue
 
-            if a_items and b_items:
-                # A+B都有
-                all_items = a_items + b_items
-                sizes = {info['size'] for _, info in all_items}
-                if len(sizes) > 1:
-                    # 大小不同：保留全局最大的（A侧优先）
-                    max_size = max(info['size'] for _, info in all_items)
-                    max_items = [(p, i) for p, i in all_items if i['size'] == max_size]
-                    a_max = [(p, i) for p, i in max_items if p in self.all_files_a]
-                    if a_max:
-                        keep = max(a_max, key=lambda x: x[1]['mtime'])[0]
-                    else:
-                        keep = max(max_items, key=lambda x: x[1]['mtime'])[0]
-                else:
-                    # 大小相同：保留A侧最新的
-                    keep = max(a_items, key=lambda x: x[1]['mtime'])[0]
-                for path, _ in all_items:
-                    if path != keep:
-                        checked_paths.add(path)
-            elif a_items:
-                # 只有A侧
-                sizes = {info['size'] for _, info in a_items}
-                if len(sizes) > 1:
-                    keep = max(a_items, key=lambda x: x[1]['size'])[0]
-                else:
-                    keep = max(a_items, key=lambda x: x[1]['mtime'])[0]
-                for path, _ in a_items:
-                    if path != keep:
-                        checked_paths.add(path)
-            elif b_items:
-                # 只有B侧
-                sizes = {info['size'] for _, info in b_items}
-                if len(sizes) > 1:
-                    keep = max(b_items, key=lambda x: x[1]['size'])[0]
-                else:
-                    keep = max(b_items, key=lambda x: x[1]['mtime'])[0]
-                for path, _ in b_items:
-                    if path != keep:
-                        checked_paths.add(path)
+            # 权重：时长最大 > 文件最大 > 文件最新
+            # 候选列表，逐步缩小范围
+            candidates = all_items[:]
+
+            if use_duration:
+                with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
+                if with_dur:
+                    max_dur = max(i['duration'] for _, i in with_dur)
+                    candidates = [(p, i) for p, i in with_dur if i['duration'] == max_dur]
+
+            if use_size and len(candidates) > 1:
+                max_sz = max(i['size'] for _, i in candidates)
+                candidates = [(p, i) for p, i in candidates if i['size'] == max_sz]
+
+            if use_mtime and len(candidates) > 1:
+                max_mt = max(i['mtime'] for _, i in candidates)
+                candidates = [(p, i) for p, i in candidates if i['mtime'] == max_mt]
+
+            # 最终保留：A侧优先
+            a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
+            if a_cand:
+                keep = a_cand[0][0]
+            else:
+                keep = candidates[0][0]
+
+            # 其余全部勾选
+            for path, _ in all_items:
+                if path != keep:
+                    checked_paths.add(path)
 
         # 在 Treeview 中勾选
         for tree in trees:
             for item in tree.get_children():
-                # item 本身就是 iid（即完整文件路径）
                 if item in checked_paths:
                     tree.item(item, text='☑')
                     self._set_checked_tag(tree, item, True)
                     self.checked_items[id(tree)].add(item)
 
         self.update_selection_stats()
-
-    def select_smallest_in_similar(self):
-        """在相似文件中，每组勾选文件大小最小的（A/B同size则选B侧）"""
-        if not self.similar_groups:
-            return
-        self._select_smallest_in_groups(self.similar_groups, 'sim')
-
-    def select_smallest_in_approximate(self):
-        """在近似文件中，每组勾选文件大小最小的（A/B同size则选B侧）"""
-        if not self.approximate_groups:
-            return
-        self._select_smallest_in_groups(self.approximate_groups, 'approx')
 
     def _get_selected_paths(self) -> List[str]:
         """获取所有选中树中的文件路径"""
