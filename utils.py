@@ -147,6 +147,53 @@ def get_audio_duration(filepath: str) -> Optional[float]:
     return None
 
 
+def get_audio_tags(filepath: str) -> dict:
+    """
+    读取音频文件的 title 和 artist 标签。
+    优先 tinytag，fallback mutagen。
+
+    Returns:
+        {'title': str or None, 'artist': str or None}
+    """
+    try:
+        from tinytag import TinyTag
+        tag = TinyTag.get(filepath)
+        return {'title': tag.title, 'artist': tag.artist}
+    except Exception:
+        pass
+    try:
+        from mutagen import File
+        from mutagen.mp3 import MP3
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.mp4 import MP4
+        audio = File(filepath)
+        if audio is None:
+            return {'title': None, 'artist': None}
+
+        title = None
+        artist = None
+
+        if isinstance(audio, MP3):
+            title = audio.get('TIT2', [None])[0] if 'TIT2' in audio else None
+            artist = audio.get('TPE1', [None])[0] if 'TPE1' in audio else None
+        elif isinstance(audio, FLAC) or isinstance(audio, OggVorbis):
+            title = audio.get('title', [None])[0] if audio.get('title') else None
+            artist = audio.get('artist', [None])[0] if audio.get('artist') else None
+        elif isinstance(audio, MP4):
+            title = audio.get('\xa9nam', [None])[0] if '\xa9nam' in audio else None
+            artist = audio.get('\xa9ART', [None])[0] if '\xa9ART' in audio else None
+        else:
+            # 通用 fallback
+            title = audio.get('title', None)
+            artist = audio.get('artist', None)
+
+        return {'title': title, 'artist': artist}
+    except Exception:
+        pass
+    return {'title': None, 'artist': None}
+
+
 def format_duration(seconds: Optional[float]) -> str:
     """将秒数格式化为 M:SS，None 返回 '--'"""
     if seconds is None or seconds < 0:

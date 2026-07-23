@@ -7,6 +7,8 @@ Jwx音乐文件筛查工具 - Tkinter 主界面
 
 import os
 import sys
+import json
+import random
 import shutil
 import threading
 import time
@@ -21,9 +23,10 @@ from typing import Dict, Optional, Tuple, List
 import ctypes
 from ctypes import wintypes
 
-from utils import ChangeStatus, ScanType, FileState, compute_md5, get_app_dir, get_audio_duration, format_duration
+from utils import ChangeStatus, ScanType, FileState, compute_md5, get_app_dir, get_audio_duration, get_audio_tags, format_duration
 from task_manager import TaskManager
 from scanner_core import find_duplicates, find_similar, find_approximate
+import ai_analyzer
 
 
 def _generate_blank_ico() -> str:
@@ -298,6 +301,15 @@ class MusicScannerWithTasks(tk.Tk):
         self.smart_use_duration = tk.BooleanVar(value=True)
         self.smart_use_size = tk.BooleanVar(value=True)
         self.smart_use_mtime = tk.BooleanVar(value=True)
+        # 单侧去重：默认关闭，仅处理两侧都有的组
+        self.smart_single_side = tk.BooleanVar(value=False)
+
+        # AI 分析配置
+        self.ai_config_path = get_app_dir() / "ai_config.json"
+        self.ai_config: dict = {}
+        self.file_tags: Dict[str, dict] = {}  # path -> {title, artist}
+        self.ai_judgments: Optional[List[dict]] = None  # AI 分析结果
+        self._load_ai_config()
 
         # 扫描结果数据
         self.duplicate_groups = []
@@ -812,18 +824,11 @@ class MusicScannerWithTasks(tk.Tk):
         btn_qb.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
         Tooltip(btn_qb, "在当前视图（重复/相似/近似）中一键选中所有文件夹B的文件")
 
-        # Row 1: 智选去重（跨2列）
+        # Row 1: 智选去重 + 单侧去重勾选
         btn_smart = tk.Button(top_frame, text="智选去重",
                               command=self.smart_select, **btn_cfg)
-        btn_smart.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky='nsew')
+        btn_smart.grid(row=1, column=0, padx=(10, 2), pady=10, sticky='nsew')
         Tooltip(btn_smart, "根据下方勾选的条件，在每组中智能保留最优文件，其余勾选")
-
-        # Row 2: 三个筛选条件复选框（横排）
-        cond_frame = tk.Frame(top_frame, bg=self.colors['card'])
-        cond_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=10, pady=(0, 8))
-        cond_frame.grid_columnconfigure(0, weight=1)
-        cond_frame.grid_columnconfigure(1, weight=1)
-        cond_frame.grid_columnconfigure(2, weight=1)
 
         cb_cfg = dict(
             bg=self.colors['card'], fg=self.colors['text'],
@@ -832,6 +837,20 @@ class MusicScannerWithTasks(tk.Tk):
             activebackground=self.colors['card'],
             activeforeground=self.colors['text']
         )
+
+        cb_single = tk.Checkbutton(top_frame, text="单侧去重",
+                                   variable=self.smart_single_side, **cb_cfg)
+        cb_single.grid(row=1, column=1, padx=(2, 10), pady=10, sticky='w')
+        Tooltip(cb_single, "不勾选→仅显示两侧文件数量相等的组（无空行）；勾选→仅显示数量不等的单侧/跨侧组（有空行）")
+        # 勾选单侧去重时自动调整相似度和时长阈值
+        cb_single.configure(command=self._on_single_side_toggled)
+
+        # Row 2: 三个筛选条件复选框（横排）
+        cond_frame = tk.Frame(top_frame, bg=self.colors['card'])
+        cond_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=10, pady=(0, 8))
+        cond_frame.grid_columnconfigure(0, weight=1)
+        cond_frame.grid_columnconfigure(1, weight=1)
+        cond_frame.grid_columnconfigure(2, weight=1)
 
         tk.Checkbutton(cond_frame, text="最大时长", variable=self.smart_use_duration,
                        **cb_cfg).grid(row=0, column=0, sticky='w')
@@ -892,6 +911,42 @@ class MusicScannerWithTasks(tk.Tk):
                 bg=self.colors['card'], fg='#94a3b8',
                 font=('Segoe UI', 8)).pack()
 
+        # ── AI 分析区域 ──
+        sep = tk.Frame(container, bg=self.colors['border'], height=1)
+        sep.pack(fill=tk.X, padx=15, pady=8)
+
+        ai_frame = tk.Frame(container, bg=self.colors['card'])
+        ai_frame.pack(pady=(0, 10))
+
+        tk.Label(ai_frame, text="─ AI 分析 ─",
+                bg=self.colors['card'], fg=self.colors['accent'],
+                font=('Segoe UI', 9, 'bold')).pack()
+
+        tk.Label(ai_frame, text="歌曲名→歌手→时长",
+                bg=self.colors['card'], fg='#94a3b8',
+                font=('Segoe UI', 8)).pack()
+
+        btn_cfg_ai = dict(
+            bg=self.colors['border'], fg=self.colors['text'],
+            font=('Segoe UI', 9), cursor='hand2',
+            width=14, relief='raised', bd=1
+        )
+
+        btn_api = tk.Button(ai_frame, text="🔑 API 配置",
+                            command=self._configure_api, **btn_cfg_ai)
+        btn_api.pack(pady=(8, 4))
+        Tooltip(btn_api, "配置 AI 服务的 API Endpoint、Key 和模型")
+
+        btn_ai = tk.Button(ai_frame, text="🤖 AI 分析",
+                           command=self._run_ai_analysis, **btn_cfg_ai)
+        btn_ai.pack(pady=(4, 2))
+        Tooltip(btn_ai, "将当前视图的分组发送到 AI 分析是否同一首歌，自动勾选应去重文件")
+
+        btn_export = tk.Button(ai_frame, text="📄 列表导出",
+                               command=self._export_list_to_txt, **btn_cfg_ai)
+        btn_export.pack(pady=(4, 2))
+        Tooltip(btn_export, "导出 AI 分析结果 CSV（需先运行 AI 分析）")
+
     def setup_bottom_result_panel(self, parent):
         """底部通栏结果区：统一左右 A/B 分栏"""
         # Treeview 样式：协调的浅灰背景，避免纯白刺眼
@@ -939,14 +994,16 @@ class MusicScannerWithTasks(tk.Tk):
             frame = tk.LabelFrame(container, text=title, bg=self.colors['card'],
                                   fg=self.colors['text'], font=('Segoe UI', 10, 'bold'))
             frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
-            tree = ttk.Treeview(frame, columns=('no', 'name', 'duration', 'size', 'mtime'),
+            tree = ttk.Treeview(frame, columns=('no', 'name', 'play', 'duration', 'size', 'mtime'),
                                 show='tree headings', selectmode='browse')
             tree.heading('#0', text='选择')
             tree.column('#0', width=12, anchor='center')
             tree.heading('no', text='序号')
             tree.column('no', width=30, anchor='center')
             tree.heading('name', text='文件名')
-            tree.column('name', width=300, anchor='center')
+            tree.column('name', width=280, anchor='center')
+            tree.heading('play', text='🎵')
+            tree.column('play', width=28, anchor='center')
             tree.heading('duration', text='时长')
             tree.column('duration', width=55, anchor='center')
             tree.heading('size', text='大小')
@@ -1346,6 +1403,15 @@ class MusicScannerWithTasks(tk.Tk):
             'similarity_threshold': self.similarity_var.get() / 100.0,
             'duration_threshold': self.duration_threshold_var.get() / 100.0,
         }
+
+    def _on_single_side_toggled(self):
+        """勾选/取消单侧去重时自动调整阈值"""
+        if self.smart_single_side.get():
+            self.similarity_var.set(75)
+            self.duration_threshold_var.set(99)
+        else:
+            self.similarity_var.set(80)
+            self.duration_threshold_var.set(98)
 
     # ==================== 任务管理 ====================
 
@@ -1993,7 +2059,7 @@ class MusicScannerWithTasks(tk.Tk):
                 files[c.path]['duration'] = c.duration
 
     def _read_durations(self, files: Dict[str, dict], progress_callback=None):
-        """按需读取音频时长，仅当启用时长过滤时执行（多线程并行）"""
+        """按需读取音频时长和标签，仅当启用时长过滤时执行（多线程并行）"""
         if not self.scan_options['use_duration'].get():
             return
 
@@ -2008,6 +2074,9 @@ class MusicScannerWithTasks(tk.Tk):
             idx, path = i_path
             try:
                 duration = get_audio_duration(path)
+                # 一并读取标签
+                tags = get_audio_tags(path)
+                self.file_tags[path] = tags
             except Exception:
                 duration = None
             if progress_callback and total > 0:
@@ -2305,6 +2374,13 @@ class MusicScannerWithTasks(tk.Tk):
         """刷新底部统一双树（含序号列）"""
         left = self.result_tree_a
         right = self.result_tree_b
+
+        # 配置组交替底色 tag
+        GROUP_TAGS = ('group_even', 'group_odd')
+        for tree in (left, right):
+            tree.tag_configure('group_even', background='#dbeafe')    # 淡蓝
+            tree.tag_configure('group_odd', background='#fef9c3')     # 淡黄
+
         for item in left.get_children(): left.delete(item)
         for item in right.get_children(): right.delete(item)
         self.checked_items[id(left)] = set()
@@ -2320,55 +2396,72 @@ class MusicScannerWithTasks(tk.Tk):
 
         def _insert(tree, counter_list, path, info_dict, checkable=True, tags=()):
             if info_dict is None:
-                tree.insert('', tk.END, text='', values=(_fmt_no(counter_list), '', '', '', ''), tags=tags)
+                tree.insert('', tk.END, text='', values=(_fmt_no(counter_list), '', '', '', '', ''), tags=tags)
             else:
                 sel = '☐' if checkable else ''
                 tree.insert('', tk.END, iid=path, text=sel,
-                            values=(_fmt_no(counter_list), info_dict['name'], format_duration(info_dict.get('duration')), self._fmt_size(info_dict['size']), self._fmt_ctime(info_dict['mtime'])),
+                            values=(_fmt_no(counter_list), info_dict['name'], '▶', format_duration(info_dict.get('duration')), self._fmt_size(info_dict['size']), self._fmt_ctime(info_dict['mtime'])),
                             tags=tags)
 
         if vt == 'dup':
-            for group in self.duplicate_groups:
+            for gi, group in enumerate(self.duplicate_groups):
                 a_items = [(p, i) for p, i in group if p in self.all_files_a]
                 b_items = [(p, i) for p, i in group if p in self.all_files_b]
                 max_len = max(len(a_items), len(b_items))
+                gtag = GROUP_TAGS[gi % 2]
                 for i in range(max_len):
                     if i < len(a_items):
-                        _insert(left, left_counter, a_items[i][0], a_items[i][1], tags=('dup',))
+                        _insert(left, left_counter, a_items[i][0], a_items[i][1], tags=('dup', gtag))
                     else:
-                        _insert(left, left_counter, None, None, tags=('dup',))
+                        _insert(left, left_counter, None, None, tags=('dup', gtag))
                     if i < len(b_items):
-                        _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=('dup',))
+                        _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=('dup', gtag))
                     else:
-                        _insert(right, right_counter, None, None, tags=('dup',))
+                        _insert(right, right_counter, None, None, tags=('dup', gtag))
         elif vt == 'sim':
-            for group in self.similar_groups:
+            for gi, group in enumerate(self.similar_groups):
                 a_items = [(p, i) for p, i in group if p in self.all_files_a]
                 b_items = [(p, i) for p, i in group if p in self.all_files_b]
+                # 单侧去重：不勾选→仅显示两侧数量相等的组；勾选→仅显示数量不等的组
+                if not self.smart_single_side.get():
+                    if not a_items or not b_items or len(a_items) != len(b_items):
+                        continue
+                else:
+                    if a_items and b_items and len(a_items) == len(b_items):
+                        continue
                 max_len = max(len(a_items), len(b_items))
+                gtag = GROUP_TAGS[gi % 2]
                 for i in range(max_len):
                     if i < len(a_items):
-                        _insert(left, left_counter, a_items[i][0], a_items[i][1], tags=('sim',))
+                        _insert(left, left_counter, a_items[i][0], a_items[i][1], tags=('sim', gtag))
                     else:
-                        _insert(left, left_counter, None, None, tags=('sim',))
+                        _insert(left, left_counter, None, None, tags=('sim', gtag))
                     if i < len(b_items):
-                        _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=('sim',))
+                        _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=('sim', gtag))
                     else:
-                        _insert(right, right_counter, None, None, tags=('sim',))
+                        _insert(right, right_counter, None, None, tags=('sim', gtag))
         elif vt == 'approx':
-            for group in self.approximate_groups:
+            for gi, group in enumerate(self.approximate_groups):
                 a_items = [(p, i) for p, i in group if p in self.all_files_a]
                 b_items = [(p, i) for p, i in group if p in self.all_files_b]
+                # 单侧去重：不勾选→仅显示两侧数量相等的组；勾选→仅显示数量不等的组
+                if not self.smart_single_side.get():
+                    if not a_items or not b_items or len(a_items) != len(b_items):
+                        continue
+                else:
+                    if a_items and b_items and len(a_items) == len(b_items):
+                        continue
                 max_len = max(len(a_items), len(b_items))
+                gtag = GROUP_TAGS[gi % 2]
                 for i in range(max_len):
                     if i < len(a_items):
-                        _insert(left, left_counter, a_items[i][0], a_items[i][1], tags=('approx',))
+                        _insert(left, left_counter, a_items[i][0], a_items[i][1], tags=('approx', gtag))
                     else:
-                        _insert(left, left_counter, None, None, tags=('approx',))
+                        _insert(left, left_counter, None, None, tags=('approx', gtag))
                     if i < len(b_items):
-                        _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=('approx',))
+                        _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=('approx', gtag))
                     else:
-                        _insert(right, right_counter, None, None, tags=('approx',))
+                        _insert(right, right_counter, None, None, tags=('approx', gtag))
         elif vt == 'chg':
             a_changes = [c for c in self.change_results if c.folder_type == 'A']
             b_changes = [c for c in self.change_results if c.folder_type == 'B']
@@ -2442,7 +2535,7 @@ class MusicScannerWithTasks(tk.Tk):
             self._update_item_tags(tree, row, remove_tags=('checked',))
 
     def on_tree_click(self, event):
-        """点击 Treeview 切换复选框状态（#0 text 为选择列）"""
+        """点击 Treeview 切换复选框状态（#0 列）或播放文件（🎵 列）"""
         tree = event.widget
         region = tree.identify_region(event.x, event.y)
         if region not in ('cell', 'tree'):
@@ -2451,6 +2544,17 @@ class MusicScannerWithTasks(tk.Tk):
         if not row:
             return
         col = tree.identify_column(event.x)
+
+        # #3 列 = 播放列
+        if col == '#3':
+            if row and os.path.isfile(row):
+                try:
+                    os.startfile(row)
+                except Exception as e:
+                    messagebox.showerror("播放失败", f"无法打开文件: {e}")
+            return
+
+        # #0 列 = 选择列
         if col != '#0':
             return
         current = tree.item(row, 'text')
@@ -2607,10 +2711,22 @@ class MusicScannerWithTasks(tk.Tk):
             all_items = a_items + b_items
             if not all_items:
                 continue
+            # 单侧去重：不勾选→仅处理两侧数量相等的组；勾选→仅处理数量不等的组
+            if not self.smart_single_side.get():
+                if not a_items or not b_items or len(a_items) != len(b_items):
+                    continue
+            else:
+                if a_items and b_items and len(a_items) == len(b_items):
+                    continue
 
-            # 权重：时长最大 > 文件最大 > 文件最新
+            # 权重：伴奏版优先 > 时长最大 > 文件最大 > 文件最新
             # 候选列表，逐步缩小范围
             candidates = all_items[:]
+
+            # 伴奏版优先：文件名含"伴奏"的优先保留
+            acc = [(p, i) for p, i in candidates if '伴奏' in i.get('name', '')]
+            if acc:
+                candidates = acc
 
             if use_duration:
                 with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
@@ -2881,3 +2997,436 @@ class MusicScannerWithTasks(tk.Tk):
             return
         self._scan_progress_event.wait(0.1)
         self.after(100, self._poll_refresh_progress)
+
+    # ==================== AI 分析 ====================
+
+    def _load_ai_config(self):
+        """加载 AI 配置并检查主机名绑定"""
+        cfg_path = self.ai_config_path
+        if not cfg_path.exists():
+            self.ai_config = {}
+            return
+
+        try:
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            saved_host = cfg.get('hostname', '')
+            current_host = os.environ.get('COMPUTERNAME', '')
+            if saved_host and saved_host != current_host:
+                # 主机名不匹配，删配置防泄露
+                cfg_path.unlink(missing_ok=True)
+                self.ai_config = {}
+                return
+            self.ai_config = cfg
+        except Exception:
+            self.ai_config = {}
+
+    def _save_ai_config(self, endpoint: str, api_key: str, model: str):
+        """保存 AI 配置（含主机名绑定）"""
+        cfg = {
+            'hostname': os.environ.get('COMPUTERNAME', ''),
+            'endpoint': endpoint.rstrip('/'),
+            'api_key': api_key,
+            'model': model
+        }
+        try:
+            with open(self.ai_config_path, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            self.ai_config = cfg
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法保存 AI 配置: {e}")
+
+    def _configure_api(self):
+        """弹出 API 配置对话框"""
+        dialog = self._create_dialog("AI 服务配置", 420, 260)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="API Endpoint",
+                bg=self.colors['card'], fg=self.colors['text'],
+                font=('Segoe UI', 9)).pack(pady=(15, 2))
+
+        endpoint_var = tk.StringVar(value=self.ai_config.get('endpoint', 'https://api.openai.com/v1'))
+        tk.Entry(dialog, textvariable=endpoint_var, width=50,
+                font=('Segoe UI', 10)).pack(pady=(0, 8))
+
+        tk.Label(dialog, text="API Key",
+                bg=self.colors['card'], fg=self.colors['text'],
+                font=('Segoe UI', 9)).pack(pady=(0, 2))
+
+        key_var = tk.StringVar(value=self.ai_config.get('api_key', ''))
+        tk.Entry(dialog, textvariable=key_var, width=50,
+                font=('Segoe UI', 10), show='*').pack(pady=(0, 8))
+
+        tk.Label(dialog, text="模型名称",
+                bg=self.colors['card'], fg=self.colors['text'],
+                font=('Segoe UI', 9)).pack(pady=(0, 2))
+
+        model_var = tk.StringVar(value=self.ai_config.get('model', 'gpt-4o-mini'))
+        tk.Entry(dialog, textvariable=model_var, width=50,
+                font=('Segoe UI', 10)).pack(pady=(0, 12))
+
+        def do_save():
+            ep = endpoint_var.get().strip()
+            key = key_var.get().strip()
+            mdl = model_var.get().strip()
+            if not ep or not key or not mdl:
+                messagebox.showwarning("配置不完整", "请填写所有字段", parent=dialog)
+                return
+            self._save_ai_config(ep, key, mdl)
+            dialog.destroy()
+            messagebox.showinfo("配置已保存", "AI 配置已保存，点击「AI 分析」即可使用")
+
+        btn_frame = tk.Frame(dialog, bg=self.colors['card'])
+        btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text="保存",
+                 command=do_save,
+                 bg='#f59e0b', fg='white', font=('Segoe UI', 10, 'bold'), cursor='hand2').pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消",
+                 command=dialog.destroy,
+                 bg=self.colors['border'], fg=self.colors['text'], font=('Segoe UI', 10), cursor='hand2').pack(side=tk.LEFT, padx=5)
+
+    def _run_ai_analysis(self):
+        """运行 AI 分析：将当前视图分组发送到 AI 判断是否为同一首歌"""
+        vt = self.result_view_type
+        if vt not in ('sim', 'approx'):
+            messagebox.showinfo("提示", "请在相似文件或近似文件视图下使用 AI 分析")
+            return
+
+        if not self.ai_config.get('endpoint') or not self.ai_config.get('api_key'):
+            ret = messagebox.askyesno("未配置 API", "尚未配置 AI 服务，是否前往配置？")
+            if ret:
+                self._configure_api()
+            return
+
+        groups = self.similar_groups if vt == 'sim' else self.approximate_groups
+        if not groups:
+            messagebox.showinfo("提示", "当前视图中没有分组数据")
+            return
+
+        # 构建 file_tags 字典（仅包含当前分组涉及的文件）
+        all_paths = set()
+        for group in groups:
+            for path, _ in group:
+                all_paths.add(path)
+        tags_subset = {p: self.file_tags.get(p, {}) for p in all_paths}
+
+        # 进度窗口
+        total_groups = len(groups)
+        progress_dialog = self._create_dialog("AI 分析", 380, 130)
+        tk.Label(progress_dialog, text=f"正在分析 {total_groups} 组...",
+                bg=self.colors['card'], fg=self.colors['text'],
+                font=('Segoe UI', 10)).pack(pady=(15, 5))
+        progress_var = tk.StringVar(value="准备中...")
+        tk.Label(progress_dialog, textvariable=progress_var,
+                bg=self.colors['card'], fg='#94a3b8',
+                font=('Segoe UI', 9)).pack()
+        progress_dialog.update()
+
+        def _on_progress(current, total, msg):
+            progress_var.set(msg)
+            progress_dialog.update()
+
+        try:
+            judgments = ai_analyzer.analyze_groups(
+                groups, tags_subset, self.ai_config,
+                progress_callback=_on_progress
+            )
+            self.ai_judgments = judgments  # 保存 AI 结果供导出使用
+        except Exception as e:
+            progress_dialog.destroy()
+            messagebox.showerror("AI 分析失败", str(e))
+            return
+
+        progress_dialog.destroy()
+
+        if not judgments:
+            messagebox.showinfo("AI 分析", "AI 未返回有效结果")
+            return
+
+        # 处理结果：按聚类处理（AI 返回每组的文件聚类）
+        same_count = 0
+        diff_count = 0
+        error_count = 0
+        checked_paths = set()
+
+        for j in judgments:
+            gi = j.get('group_index')
+            # group_index=-1 表示该批分析失败
+            if gi == -1:
+                error_count += 1
+                continue
+            if gi is None or gi >= len(groups):
+                continue
+
+            clusters = j.get('clusters', [])
+            if not clusters:
+                continue
+
+            group = groups[gi]
+            total_in_group = len(group)
+            clustered_count = sum(len(c) for c in clusters)
+
+            # 每个 cluster 代表一组同一首歌
+            for cluster in clusters:
+                if len(cluster) < 2:
+                    # 单个文件：不同歌曲，不做操作
+                    diff_count += 1
+                    continue
+
+                # 该 cluster 内是同一首歌的不同版本
+                same_count += 1
+                cluster_paths = [group[idx][0] for idx in cluster if idx < total_in_group]
+                if len(cluster_paths) < 2:
+                    continue
+
+                cluster_a = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_a]
+                cluster_b = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_b]
+                all_cluster_items = cluster_a + cluster_b
+
+                if not all_cluster_items:
+                    continue
+
+                # 用智选去重的逻辑保留最优文件
+                candidates = all_cluster_items[:]
+                use_duration = self.smart_use_duration.get()
+                use_size = self.smart_use_size.get()
+                use_mtime = self.smart_use_mtime.get()
+
+                if use_duration:
+                    with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
+                    if with_dur:
+                        max_dur = max(i['duration'] for _, i in with_dur)
+                        candidates = [(p, i) for p, i in with_dur if i['duration'] == max_dur]
+
+                if use_size and len(candidates) > 1:
+                    max_sz = max(i['size'] for _, i in candidates)
+                    candidates = [(p, i) for p, i in candidates if i['size'] == max_sz]
+
+                if use_mtime and len(candidates) > 1:
+                    max_mt = max(i['mtime'] for _, i in candidates)
+                    candidates = [(p, i) for p, i in candidates if i['mtime'] == max_mt]
+
+                # A 侧优先
+                a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
+                keep = a_cand[0][0] if a_cand else candidates[0][0]
+
+                for path, _ in all_cluster_items:
+                    if path != keep:
+                        checked_paths.add(path)
+
+        if not checked_paths:
+            msg = f"AI 分析了 {total_groups} 组"
+            if same_count:
+                msg += f"，{same_count} 个同歌组已处理但无需勾选"
+            else:
+                msg += "，未发现需要去重的文件"
+            messagebox.showinfo("AI 分析", msg)
+            return
+
+        # 切换到当前视图并勾选
+        self.switch_result_view(vt)
+        trees = [self.result_tree_a, self.result_tree_b]
+
+        # 清空旧勾选
+        for tree in trees:
+            self.checked_items[id(tree)] = set()
+            for item in tree.get_children():
+                cur = tree.item(item, 'text')
+                if cur in ('☐', '☑'):
+                    tree.item(item, text='☐')
+                    self._set_checked_tag(tree, item, False)
+
+        for tree in trees:
+            for item in tree.get_children():
+                if item in checked_paths:
+                    tree.item(item, text='☑')
+                    self._set_checked_tag(tree, item, True)
+                    self.checked_items[id(tree)].add(item)
+
+        self.update_selection_stats()
+
+        summary = (f"AI 分析了 {total_groups} 组\n"
+                   f"• {same_count} 个同歌组已自动勾选，保留最优文件\n"
+                   f"• {diff_count} 个不同歌曲已保留")
+        if error_count:
+            summary += f"\n⚠ {error_count} 批分析失败（可重新运行 AI 分析重试）"
+        summary += "\n\n请检查勾选结果后移入回收站"
+        messagebox.showinfo("AI 分析完成", summary)
+
+    def _export_list_to_txt(self):
+        """将 AI 分析结果导出为 CSV（无 AI 结果时提示先运行）"""
+        vt = self.result_view_type
+
+        # 分组视图必须要有 AI 分析结果
+        if vt in ('sim', 'approx') and not self.ai_judgments:
+            ret = messagebox.askyesno("无 AI 分析结果",
+                "当前视图尚未运行 AI 分析，导出的数据不会包含 AI 判断。\n\n是否先运行 AI 分析？")
+            if ret:
+                self._run_ai_analysis()
+            return
+
+        # 选择保存路径（自动生成文件名）
+        now = datetime.now()
+        letters = f"{random.choice('abcdefghijklmnopqrstuvwxyz')}{random.choice('abcdefghijklmnopqrstuvwxyz')}"
+        default_name = f"{now.year}-{now.month:02d}-{now.day:02d}-{letters}.csv"
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            initialfile=default_name,
+            filetypes=[("CSV 文件", "*.csv")],
+            title=f"导出 {vt} 视图"
+        )
+        if not file_path:
+            return
+
+        # 获取视图名称和分组数据
+        view_names = {'dup': '重复文件', 'sim': '相似文件', 'approx': '近似文件',
+                      'chg': '变更文件', 'all': '全部文件'}
+        view_name = view_names.get(vt, '文件列表')
+        groups = []
+        if vt == 'dup':
+            groups = self.duplicate_groups
+        elif vt == 'sim':
+            groups = self.similar_groups
+        elif vt == 'approx':
+            groups = self.approximate_groups
+
+        # 智选规则文本
+        rules_text = (
+            "选中规则: 时长最大 → 文件最大 → 最新文件 → A侧优先, "
+            "勾选的条件以工具栏设置为准"
+        )
+
+        def _csv_quote(val):
+            """CSV 字段转义：含逗号/引号时加双引号"""
+            s = str(val)
+            if ',' in s or '"' in s or '\n' in s:
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        def _pick_keep(group):
+            """按智选规则从组中选出应保留的文件路径"""
+            a_items = [(p, i) for p, i in group if p in self.all_files_a]
+            b_items = [(p, i) for p, i in group if p in self.all_files_b]
+            all_items = a_items + b_items
+            if not all_items:
+                return None
+
+            candidates = all_items[:]
+            use_duration = self.smart_use_duration.get()
+            use_size = self.smart_use_size.get()
+            use_mtime = self.smart_use_mtime.get()
+
+            if use_duration:
+                with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
+                if with_dur:
+                    max_dur = max(i['duration'] for _, i in with_dur)
+                    candidates = [(p, i) for p, i in with_dur if i['duration'] == max_dur]
+
+            if use_size and len(candidates) > 1:
+                max_sz = max(i['size'] for _, i in candidates)
+                candidates = [(p, i) for p, i in candidates if i['size'] == max_sz]
+
+            if use_mtime and len(candidates) > 1:
+                max_mt = max(i['mtime'] for _, i in candidates)
+                candidates = [(p, i) for p, i in candidates if i['mtime'] == max_mt]
+
+            a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
+            return a_cand[0][0] if a_cand else candidates[0][0]
+
+        lines = []
+        # 文件头注释
+        lines.append(f"# 文件列表导出 - {view_name}")
+        lines.append(f"# 导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"# AI 分析结果（聚类标识：同歌cluster内去重，跨cluster不同歌全部保留）")
+        lines.append(f"# {rules_text}")
+        lines.append("# ★保留 = 按规则应保留的文件, 去重 = 建议删除的冗余文件")
+        lines.append("")
+
+        if groups:
+            # CSV 列头
+            lines.append("组号,位置,文件名,时长,大小,修改时间,选中状态")
+
+            for gi, group in enumerate(groups):
+                gno = f"G{gi + 1}"
+
+                # 查找 AI 聚类结果
+                ai_clusters = None
+                if self.ai_judgments:
+                    for j in self.ai_judgments:
+                        if j.get('group_index') == gi:
+                            ai_clusters = j.get('clusters')
+                            break
+
+                if ai_clusters and vt in ('sim', 'approx'):
+                    # 用 AI 聚类：每个 cluster 内同歌，跨 cluster 不同歌
+                    cluster_keep_map = {}
+                    for cluster in ai_clusters:
+                        cluster_paths = [group[idx][0] for idx in cluster if idx < len(group)]
+                        if len(cluster_paths) >= 2:
+                            # 同歌 cluster：选一个保留
+                            keep = _pick_keep([(p, dict(info)) for p, info in group if p in cluster_paths])
+                            for p in cluster_paths:
+                                cluster_keep_map[p] = (p == keep)
+                        else:
+                            # 单文件 cluster：不同歌，全部保留
+                            for p in cluster_paths:
+                                cluster_keep_map[p] = True
+
+                    for path, info in group:
+                        name = info.get('name', '?')
+                        dur = format_duration(info.get('duration'))
+                        size = self._fmt_size(info['size'])
+                        mtime = self._fmt_ctime(info['mtime'])
+                        side = 'A' if path in self.all_files_a else 'B'
+                        is_keep = cluster_keep_map.get(path, True)
+                        status = '★保留' if is_keep else '去重'
+                        row = f"{gno},{side},{_csv_quote(name)},{dur},{_csv_quote(size)},{_csv_quote(mtime)},{status}"
+                        lines.append(row)
+                else:
+                    # 无 AI 结果：整组用智能规则
+                    keep_path = _pick_keep(group)
+                    for path, info in group:
+                        name = info.get('name', '?')
+                        dur = format_duration(info.get('duration'))
+                        size = self._fmt_size(info['size'])
+                        mtime = self._fmt_ctime(info['mtime'])
+                        side = 'A' if path in self.all_files_a else 'B'
+                        status = '★保留' if path == keep_path else '去重'
+                        row = f"{gno},{side},{_csv_quote(name)},{dur},{_csv_quote(size)},{_csv_quote(mtime)},{status}"
+                        lines.append(row)
+
+                # 组之间空行
+                lines.append("")
+        else:
+            # 非分组视图
+            if vt == 'all':
+                lines.append("文件名,时长,大小,修改时间")
+                items = list(self.all_files_a.items()) + list(self.all_files_b.items())
+                for path, info in items:
+                    name = info.get('name', '?')
+                    dur = format_duration(info.get('duration'))
+                    size = self._fmt_size(info['size'])
+                    mtime = self._fmt_ctime(info['mtime'])
+                    lines.append(f"{_csv_quote(name)},{dur},{_csv_quote(size)},{_csv_quote(mtime)}")
+            elif vt == 'chg':
+                lines.append("状态,文件名,时长,大小,修改时间")
+                for c in self.change_results:
+                    info = self.all_files_a.get(c.path) or self.all_files_b.get(c.path) or {}
+                    name = info.get('name', c.name)
+                    dur = format_duration(info.get('duration'))
+                    size = self._fmt_size(info.get('size', c.size))
+                    mtime = self._fmt_ctime(info.get('mtime', c.modified_time))
+                    lines.append(f"{c.change_status.value},{_csv_quote(name)},{dur},{_csv_quote(size)},{_csv_quote(mtime)}")
+            else:
+                lines.append("当前视图无分组数据")
+
+        lines.append("")
+        lines.append("# ABD9音乐文件筛查器")
+
+        try:
+            with open(file_path, 'w', encoding='utf-8-sig') as f:
+                f.write('\n'.join(lines))
+            messagebox.showinfo("导出成功", f"已导出到:\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e))
