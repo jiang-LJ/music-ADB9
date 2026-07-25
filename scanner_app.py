@@ -2728,6 +2728,21 @@ class MusicScannerWithTasks(tk.Tk):
             if acc:
                 candidates = acc
 
+            # Live 版优先删除：同cluster内 Live 版与非 Live 版时长差≤5秒时，保留非 Live 版
+            live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
+            non_live_cands = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
+            if live_cands and non_live_cands:
+                for _, li in live_cands:
+                    for _, ni in non_live_cands:
+                        ld = li.get('duration')
+                        nd = ni.get('duration')
+                        if ld is not None and nd is not None and abs(ld - nd) <= 5:
+                            candidates = non_live_cands
+                            break
+                    else:
+                        continue
+                    break
+
             if use_duration:
                 with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
                 if with_dur:
@@ -3193,6 +3208,21 @@ class MusicScannerWithTasks(tk.Tk):
                 use_size = self.smart_use_size.get()
                 use_mtime = self.smart_use_mtime.get()
 
+                # Live 版优先删除：同cluster内 Live 版与非 Live 版时长差≤5秒时，保留非 Live 版
+                live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
+                non_live_cands = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
+                if live_cands and non_live_cands:
+                    for _, li in live_cands:
+                        for _, ni in non_live_cands:
+                            ld = li.get('duration')
+                            nd = ni.get('duration')
+                            if ld is not None and nd is not None and abs(ld - nd) <= 5:
+                                candidates = non_live_cands
+                                break
+                        else:
+                            continue
+                        break
+
                 if use_duration:
                     with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
                     if with_dur:
@@ -3316,6 +3346,21 @@ class MusicScannerWithTasks(tk.Tk):
             use_duration = self.smart_use_duration.get()
             use_size = self.smart_use_size.get()
             use_mtime = self.smart_use_mtime.get()
+
+            # Live 版优先删除：同cluster内 Live 版与非 Live 版时长差≤5秒时，保留非 Live 版
+            live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
+            non_live_cands = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
+            if live_cands and non_live_cands:
+                for _, li in live_cands:
+                    for _, ni in non_live_cands:
+                        ld = li.get('duration')
+                        nd = ni.get('duration')
+                        if ld is not None and nd is not None and abs(ld - nd) <= 5:
+                            candidates = non_live_cands
+                            break
+                    else:
+                        continue
+                    break
 
             if use_duration:
                 with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
