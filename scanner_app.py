@@ -845,17 +845,17 @@ class MusicScannerWithTasks(tk.Tk):
 
         cb_single = tk.Checkbutton(top_frame, text="单侧去重",
                                    variable=self.smart_single_side, **cb_cfg)
-        cb_single.grid(row=1, column=0, padx=(10, 2), pady=(5, 10), sticky='w')
+        cb_single.grid(row=1, column=0, padx=(10, 2), pady=(5, 2), sticky='w')
         cb_single.configure(command=self._on_single_side_toggled)
         Tooltip(cb_single, "不勾选→仅显示两侧数量相等的组；勾选→仅显示数量不等的组")
 
         cb_fp = tk.Checkbutton(top_frame, text="音频指纹",
                                variable=self.use_fingerprint, **cb_cfg)
-        cb_fp.grid(row=1, column=0, padx=(10, 2), pady=(5, 10), sticky='e')
+        cb_fp.grid(row=2, column=0, padx=(10, 2), pady=(2, 10), sticky='w')
         Tooltip(cb_fp, "勾选后 AI 分析时用 Chromaprint 音频指纹验证聚类结果")
 
         stat_frame = tk.Frame(top_frame, bg=self.colors['card'])
-        stat_frame.grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
+        stat_frame.grid(row=1, column=1, rowspan=2, padx=10, pady=10, sticky='nsew')
         self.selection_var = tk.StringVar(value="已选择: 0 个文件")
         self.selection_detail_var = tk.StringVar(value="(A: 0, B: 0)")
         tk.Label(stat_frame, textvariable=self.selection_var,
@@ -898,54 +898,36 @@ class MusicScannerWithTasks(tk.Tk):
         container = tk.Frame(help_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        col_frame = tk.Frame(container, bg=self.colors['card'])
-        col_frame.pack(fill=tk.BOTH, expand=True)
-
-        left = tk.Frame(col_frame, bg=self.colors['card'])
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 2))
-        right = tk.Frame(col_frame, bg=self.colors['card'])
-        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(2, 0))
-
         btn_ai = dict(
             bg=self.colors['border'], fg=self.colors['text'],
             font=('Segoe UI', 9), cursor='hand2',
             relief='raised', bd=1
         )
 
-        # 左列
-        tk.Label(left, text="AI 分析",
+        tk.Label(container, text="AI 分析",
                 bg=self.colors['card'], fg=self.colors['accent'],
-                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 2))
-        tk.Label(left, text="歌曲名→歌手→时长",
-                bg=self.colors['card'], fg='#94a3b8',
-                font=('Segoe UI', 8)).pack()
+                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 4))
+        tk.Button(container, text="API 配置", command=self._configure_api,
+                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+        tk.Button(container, text="AI 分析", command=self._run_ai_analysis,
+                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+        tk.Button(container, text="导出列表", command=self._export_list_to_txt,
+                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
 
-        tk.Button(left, text="API 配置", command=self._configure_api,
-                  **btn_ai).pack(pady=(8, 4), padx=8, fill=tk.X)
-        tk.Button(left, text="AI 分析", command=self._run_ai_analysis,
-                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
-        tk.Button(left, text="导出列表", command=self._export_list_to_txt,
-                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
-
-        # 右列
-        tk.Label(right, text="学习",
+        tk.Label(container, text="学习",
                 bg=self.colors['card'], fg=self.colors['accent'],
-                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 2))
-        tk.Label(right, text="记录手动调整，下次跳过",
-                bg=self.colors['card'], fg='#94a3b8',
-                font=('Segoe UI', 8)).pack()
-
-        tk.Button(right, text="记住调整",
+                font=('Segoe UI', 9, 'bold')).pack(pady=(10, 4))
+        tk.Button(container, text="记住调整",
                   command=lambda: messagebox.showinfo(
                       "反馈已记录",
                       f"已记录 {self._record_feedback()} 个手动保留的文件"),
-                  **btn_ai).pack(pady=(8, 4), padx=8, fill=tk.X)
-        tk.Button(right, text="导出规则", command=self._export_ai_rules,
-                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
-        tk.Button(right, text="清除记录",
+                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+        tk.Button(container, text="导出规则", command=self._export_ai_rules,
+                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+        tk.Button(container, text="清除记录",
                   command=lambda: [self.clear_feedback(),
                                    messagebox.showinfo("已清除", "已清除所有反馈记录")],
-                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
+                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
 
     def setup_bottom_result_panel(self, parent):
         """底部通栏结果区：统一左右 A/B 分栏"""
