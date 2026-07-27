@@ -360,7 +360,7 @@ class MusicScannerWithTasks(tk.Tk):
         top_frame.columnconfigure(2, weight=0, minsize=225)   # 操作（加宽50%）
         top_frame.columnconfigure(3, weight=0, minsize=300)   # 扫描结果概览
         top_frame.columnconfigure(4, weight=0, minsize=300)   # 快速选择（加宽）
-        top_frame.columnconfigure(5, weight=0)   # 最右：软件使用说明
+        top_frame.columnconfigure(5, weight=0, minsize=225)   # AI 应用（与操作栏同宽）
 
         # 左栏：任务管理
         task_frame = tk.LabelFrame(top_frame, text="📋 任务管理",
