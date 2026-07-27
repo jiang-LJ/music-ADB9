@@ -816,36 +816,6 @@ class MusicScannerWithTasks(tk.Tk):
             relief='raised', bd=1
         )
 
-        # ===== 上半区：一键选A/B + 智选去重 + 筛选条件 =====
-        top_frame = tk.Frame(container, bg=self.colors['card'])
-        top_frame.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
-        for i in range(3):
-            top_frame.grid_rowconfigure(i, weight=1)
-        top_frame.grid_columnconfigure(0, weight=1)
-        top_frame.grid_columnconfigure(1, weight=1)
-
-        # Row 0: 一键选A / 一键选B
-        btn_qa = tk.Button(top_frame, text="一键选A",
-                           command=lambda: self.quick_select(self.result_view_type, 'A'), **btn_cfg)
-        btn_qa.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
-        Tooltip(btn_qa, "在当前视图（重复/相似/近似）中一键选中所有文件夹A的文件")
-
-        btn_qb = tk.Button(top_frame, text="一键选B",
-                           command=lambda: self.quick_select(self.result_view_type, 'B'), **btn_cfg)
-        btn_qb.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
-        Tooltip(btn_qb, "在当前视图（重复/相似/近似）中一键选中所有文件夹B的文件")
-
-        # Row 1: 智选去重 + 取消选择（两个按钮，与 Row 0 风格一致）
-        btn_smart = tk.Button(top_frame, text="智选去重",
-                              command=self.smart_select, **btn_cfg)
-        btn_smart.grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
-        Tooltip(btn_smart, "根据下方勾选的条件，在每组中智能保留最优文件，其余勾选")
-
-        cancel_btn = tk.Button(top_frame, text="取消选择",
-                               command=self.clear_selection, **btn_cfg)
-        cancel_btn.grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
-        Tooltip(cancel_btn, "取消所有已选中的文件")
-
         cb_cfg = dict(
             bg=self.colors['card'], fg=self.colors['text'],
             font=('Segoe UI', 9), cursor='hand2',
@@ -854,9 +824,14 @@ class MusicScannerWithTasks(tk.Tk):
             activeforeground=self.colors['text']
         )
 
-        # Row 2: 三个筛选条件复选框（横排）
+        # ===== 上半区：筛选条件 + 单侧/指纹 + 统计 =====
+        top_frame = tk.Frame(container, bg=self.colors['card'])
+        top_frame.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
+        top_frame.grid_columnconfigure(0, weight=1)
+        top_frame.grid_columnconfigure(1, weight=1)
+
         cond_frame = tk.Frame(top_frame, bg=self.colors['card'])
-        cond_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=10, pady=(0, 8))
+        cond_frame.grid(row=0, column=0, columnspan=2, sticky='ew', padx=10, pady=(10, 5))
         cond_frame.grid_columnconfigure(0, weight=1)
         cond_frame.grid_columnconfigure(1, weight=1)
         cond_frame.grid_columnconfigure(2, weight=1)
@@ -868,28 +843,19 @@ class MusicScannerWithTasks(tk.Tk):
         tk.Checkbutton(cond_frame, text="最新文件", variable=self.smart_use_mtime,
                        **cb_cfg).grid(row=0, column=2, sticky='w')
 
-        # ===== 下半区：单侧 | 指纹 | 统计 =====
-        bottom_frame = tk.Frame(container, bg=self.colors['card'])
-        bottom_frame.grid(row=1, column=0, sticky='nsew', padx=8, pady=8)
-        bottom_frame.grid_columnconfigure(0, weight=1)
-        bottom_frame.grid_columnconfigure(1, weight=1)
-
-        cb_single = tk.Checkbutton(bottom_frame, text="单侧去重",
+        cb_single = tk.Checkbutton(top_frame, text="单侧去重",
                                    variable=self.smart_single_side, **cb_cfg)
-        cb_single.grid(row=0, column=0, padx=(10, 2), pady=(10, 2), sticky='w')
-        Tooltip(cb_single, "不勾选→仅显示两侧文件数量相等的组（无空行）；勾选→仅显示数量不等的单侧/跨侧组（有空行）")
+        cb_single.grid(row=1, column=0, padx=(10, 2), pady=(5, 10), sticky='w')
         cb_single.configure(command=self._on_single_side_toggled)
+        Tooltip(cb_single, "不勾选→仅显示两侧数量相等的组；勾选→仅显示数量不等的组")
 
-        cb_fp = tk.Checkbutton(bottom_frame, text="音频指纹",
+        cb_fp = tk.Checkbutton(top_frame, text="音频指纹",
                                variable=self.use_fingerprint, **cb_cfg)
-        cb_fp.grid(row=1, column=0, padx=(10, 2), pady=(0, 10), sticky='w')
-        Tooltip(cb_fp,
-                "勾选后 AI 分析时用 Chromaprint 音频指纹验证聚类结果，"
-                "排除文件名相似但音频内容不同的文件")
+        cb_fp.grid(row=1, column=0, padx=(10, 2), pady=(5, 10), sticky='e')
+        Tooltip(cb_fp, "勾选后 AI 分析时用 Chromaprint 音频指纹验证聚类结果")
 
-        stat_frame = tk.Frame(bottom_frame, bg=self.colors['card'])
-        stat_frame.grid(row=0, column=1, rowspan=2, padx=10, pady=10, sticky='nsew')
-        stat_frame.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
+        stat_frame = tk.Frame(top_frame, bg=self.colors['card'])
+        stat_frame.grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
         self.selection_var = tk.StringVar(value="已选择: 0 个文件")
         self.selection_detail_var = tk.StringVar(value="(A: 0, B: 0)")
         tk.Label(stat_frame, textvariable=self.selection_var,
@@ -899,78 +865,87 @@ class MusicScannerWithTasks(tk.Tk):
                 bg=self.colors['card'], fg='#94a3b8',
                 font=('Segoe UI', 9)).pack(anchor=tk.CENTER, pady=(2, 0))
 
+        # ===== 下半区：四个功能按键 =====
+        bottom_frame = tk.Frame(container, bg=self.colors['card'])
+        bottom_frame.grid(row=1, column=0, sticky='nsew', padx=8, pady=8)
+        bottom_frame.grid_rowconfigure(0, weight=1)
+        bottom_frame.grid_rowconfigure(1, weight=1)
+        bottom_frame.grid_columnconfigure(0, weight=1)
+        bottom_frame.grid_columnconfigure(1, weight=1)
+
+        btn_qa = tk.Button(bottom_frame, text="一键选A",
+                           command=lambda: self.quick_select(self.result_view_type, 'A'), **btn_cfg)
+        btn_qa.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
+        Tooltip(btn_qa, "在当前视图中一键选中所有文件夹A的文件")
+
+        btn_qb = tk.Button(bottom_frame, text="一键选B",
+                           command=lambda: self.quick_select(self.result_view_type, 'B'), **btn_cfg)
+        btn_qb.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
+        Tooltip(btn_qb, "在当前视图中一键选中所有文件夹B的文件")
+
+        btn_smart = tk.Button(bottom_frame, text="智选去重",
+                              command=self.smart_select, **btn_cfg)
+        btn_smart.grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
+        Tooltip(btn_smart, "根据勾选的条件在每组中智能保留最优文件，其余勾选")
+
+        cancel_btn = tk.Button(bottom_frame, text="取消选择",
+                               command=self.clear_selection, **btn_cfg)
+        cancel_btn.grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
+        Tooltip(cancel_btn, "取消所有已选中的文件")
+
     def _fill_help_panel(self, help_frame):
-        """填充软件使用说明面板（V12：独立成一栏）"""
+        """填充 AI 应用面板"""
         container = tk.Frame(help_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # 两列布局：左→AI分析，右→反馈学习
         col_frame = tk.Frame(container, bg=self.colors['card'])
         col_frame.pack(fill=tk.BOTH, expand=True)
 
-        left_frame = tk.Frame(col_frame, bg=self.colors['card'])
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 2))
+        left = tk.Frame(col_frame, bg=self.colors['card'])
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 2))
+        right = tk.Frame(col_frame, bg=self.colors['card'])
+        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(2, 0))
 
-        right_frame = tk.Frame(col_frame, bg=self.colors['card'])
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(2, 0))
-
-        btn_cfg_ai = dict(
+        btn_ai = dict(
             bg=self.colors['border'], fg=self.colors['text'],
             font=('Segoe UI', 9), cursor='hand2',
-            width=14, relief='raised', bd=1
+            relief='raised', bd=1
         )
 
-        # ── 左列：AI 分析 ──
-        tk.Label(left_frame, text="─ AI 分析 ─",
+        # 左列
+        tk.Label(left, text="AI 分析",
                 bg=self.colors['card'], fg=self.colors['accent'],
-                font=('Segoe UI', 9, 'bold')).pack(pady=(5, 2))
-        tk.Label(left_frame, text="歌曲名→歌手→时长",
+                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 2))
+        tk.Label(left, text="歌曲名→歌手→时长",
                 bg=self.colors['card'], fg='#94a3b8',
                 font=('Segoe UI', 8)).pack()
 
-        btn_api = tk.Button(left_frame, text="🔑 API 配置",
-                            command=self._configure_api, **btn_cfg_ai)
-        btn_api.pack(pady=(8, 4))
-        Tooltip(btn_api, "配置 AI 服务的 API Endpoint、Key 和模型")
+        tk.Button(left, text="API 配置", command=self._configure_api,
+                  **btn_ai).pack(pady=(8, 4), padx=8, fill=tk.X)
+        tk.Button(left, text="AI 分析", command=self._run_ai_analysis,
+                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
+        tk.Button(left, text="导出列表", command=self._export_list_to_txt,
+                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
 
-        btn_ai = tk.Button(left_frame, text="🤖 AI 分析",
-                           command=self._run_ai_analysis, **btn_cfg_ai)
-        btn_ai.pack(pady=(4, 2))
-        Tooltip(btn_ai, "将当前视图的分组发送到 AI 分析，自动勾选应去重文件")
-
-        btn_export = tk.Button(left_frame, text="📄 列表导出",
-                               command=self._export_list_to_txt, **btn_cfg_ai)
-        btn_export.pack(pady=(4, 2))
-        Tooltip(btn_export, "导出 AI 分析结果 CSV（需先运行 AI 分析）")
-
-        # ── 右列：反馈学习 ──
-        tk.Label(right_frame, text="─ 反馈学习 ─",
+        # 右列
+        tk.Label(right, text="学习",
                 bg=self.colors['card'], fg=self.colors['accent'],
-                font=('Segoe UI', 9, 'bold')).pack(pady=(5, 2))
-        tk.Label(right_frame, text="记录手动调整，下次自动跳过",
+                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 2))
+        tk.Label(right, text="记录手动调整，下次跳过",
                 bg=self.colors['card'], fg='#94a3b8',
                 font=('Segoe UI', 8)).pack()
 
-        btn_learn = tk.Button(right_frame, text="📝 记住调整",
-                              command=lambda: messagebox.showinfo(
-                                  "反馈已记录",
-                                  f"已记录 {self._record_feedback()} 个手动保留的文件，"
-                                  "下次 AI 分析将自动跳过"),
-                              **btn_cfg_ai)
-        btn_learn.pack(pady=(12, 4))
-        Tooltip(btn_learn, "记录当前手动取消勾选的文件，下次 AI 分析跳过")
-
-        btn_export_rules = tk.Button(right_frame, text="📤 导出规则",
-                                     command=self._export_ai_rules, **btn_cfg_ai)
-        btn_export_rules.pack(pady=(4, 4))
-        Tooltip(btn_export_rules, "导出 AI 分析规则文本，用于后续版本预设")
-
-        btn_clear = tk.Button(right_frame, text="🗑️ 清除记录",
-                              command=lambda: [self.clear_feedback(),
-                                               messagebox.showinfo("已清除", "所有反馈记录已清除")],
-                              **btn_cfg_ai)
-        btn_clear.pack(pady=(4, 4))
-        Tooltip(btn_clear, "清除所有反馈学习记录")
+        tk.Button(right, text="记住调整",
+                  command=lambda: messagebox.showinfo(
+                      "反馈已记录",
+                      f"已记录 {self._record_feedback()} 个手动保留的文件"),
+                  **btn_ai).pack(pady=(8, 4), padx=8, fill=tk.X)
+        tk.Button(right, text="导出规则", command=self._export_ai_rules,
+                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
+        tk.Button(right, text="清除记录",
+                  command=lambda: [self.clear_feedback(),
+                                   messagebox.showinfo("已清除", "已清除所有反馈记录")],
+                  **btn_ai).pack(pady=(2, 4), padx=8, fill=tk.X)
 
     def setup_bottom_result_panel(self, parent):
         """底部通栏结果区：统一左右 A/B 分栏"""
