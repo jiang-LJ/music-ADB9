@@ -416,7 +416,7 @@ class MusicScannerWithTasks(tk.Tk):
         self._fill_quick_action_panel(quick_frame)
 
         # 最右栏：软件使用说明
-        help_frame = tk.LabelFrame(top_frame, text="📖 软件使用说明",
+        help_frame = tk.LabelFrame(top_frame, text="🤖 AI 应用",
                                    bg=self.colors['card'],
                                    fg=self.colors['text'],
                                    font=('Segoe UI', 11, 'bold'))
@@ -904,37 +904,10 @@ class MusicScannerWithTasks(tk.Tk):
         container = tk.Frame(help_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        inner = tk.Frame(container, bg=self.colors['card'])
-        inner.pack(expand=True)
-
-        btn_help = tk.Button(inner, text="软件使用说明",
-                             command=self.show_help,
-                             bg=self.colors['border'], fg=self.colors['text'],
-                             font=('Segoe UI', 9), cursor='hand2',
-                             width=12)
-        btn_help.pack(pady=(0, 25))
-        Tooltip(btn_help, "查看软件使用说明")
-
-        tk.Label(inner, text="联络作者微信",
-                bg=self.colors['card'], fg=self.colors['text'],
-                font=('Segoe UI', 9)).pack()
-        wechat_lbl = tk.Label(inner, text="a_better_day_9",
-                bg=self.colors['card'], fg='#86efac',
-                font=('Segoe UI', 9, 'bold'), cursor='hand2')
-        wechat_lbl.pack()
-        wechat_lbl.bind('<Button-1>', lambda e: self.copy_wechat_id())
-        Tooltip(wechat_lbl, "点击复制微信号到剪贴板")
-
-        tk.Label(inner, text="上方点击复制",
-                bg=self.colors['card'], fg='#94a3b8',
-                font=('Segoe UI', 8)).pack()
-
         # ── AI 分析区域 ──
-        sep = tk.Frame(container, bg=self.colors['border'], height=1)
-        sep.pack(fill=tk.X, padx=15, pady=8)
 
         ai_frame = tk.Frame(container, bg=self.colors['card'])
-        ai_frame.pack(pady=(0, 10))
+        ai_frame.pack(expand=True, pady=15)
 
         tk.Label(ai_frame, text="─ AI 分析 ─",
                 bg=self.colors['card'], fg=self.colors['accent'],
