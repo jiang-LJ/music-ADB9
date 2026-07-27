@@ -16,6 +16,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "=== 压缩便携 ZIP ===" -ForegroundColor Cyan
+# 确保 fpcalc.exe 在 exe 同级
+Copy-Item fpcalc.exe dist\ABD9\fpcalc.exe -Force -ErrorAction SilentlyContinue
 $zipName = "ABD9-便携版.zip"
 Remove-Item $zipName -ErrorAction SilentlyContinue
 Compress-Archive -Path dist\ABD9\* -DestinationPath $zipName -Force

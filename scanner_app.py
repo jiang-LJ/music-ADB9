@@ -304,6 +304,9 @@ class MusicScannerWithTasks(tk.Tk):
         # 单侧去重：默认关闭，仅处理两侧都有的组
         self.smart_single_side = tk.BooleanVar(value=False)
 
+        # 音频指纹验证（默认关闭）
+        self.use_fingerprint = tk.BooleanVar(value=False)
+
         # AI 分析配置
         self.ai_config_path = get_app_dir() / "ai_config.json"
         self.ai_config: dict = {}
@@ -851,6 +854,7 @@ class MusicScannerWithTasks(tk.Tk):
         cond_frame.grid_columnconfigure(0, weight=1)
         cond_frame.grid_columnconfigure(1, weight=1)
         cond_frame.grid_columnconfigure(2, weight=1)
+        cond_frame.grid_columnconfigure(3, weight=1)
 
         tk.Checkbutton(cond_frame, text="最大时长", variable=self.smart_use_duration,
                        **cb_cfg).grid(row=0, column=0, sticky='w')
@@ -858,6 +862,11 @@ class MusicScannerWithTasks(tk.Tk):
                        **cb_cfg).grid(row=0, column=1, sticky='w')
         tk.Checkbutton(cond_frame, text="最新文件", variable=self.smart_use_mtime,
                        **cb_cfg).grid(row=0, column=2, sticky='w')
+        tk.Checkbutton(cond_frame, text="音频指纹", variable=self.use_fingerprint,
+                       **cb_cfg).grid(row=0, column=3, sticky='w')
+        Tooltip(cond_frame.winfo_children()[-1],
+                "勾选后 AI 分析时用 Chromaprint 音频指纹验证聚类结果，"
+                "排除文件名相似但音频内容不同的文件")
 
         # ===== 下半区：取消选择 | 统计 =====
         bottom_frame = tk.Frame(container, bg=self.colors['card'])
@@ -3154,6 +3163,55 @@ class MusicScannerWithTasks(tk.Tk):
             return
 
         progress_dialog.destroy()
+
+        # 音频指纹验证（勾选后对 AI 聚类结果做硬件指纹比对）
+        if self.use_fingerprint.get() and judgments:
+            fp_dialog = self._create_dialog("音频指纹验证", 350, 100)
+            tk.Label(fp_dialog, text="正在进行音频指纹验证...",
+                    bg=self.colors['card'], fg=self.colors['text'],
+                    font=('Segoe UI', 10)).pack(pady=(20, 5))
+            fp_var = tk.StringVar(value="计算中...")
+            tk.Label(fp_dialog, textvariable=fp_var,
+                    bg=self.colors['card'], fg='#94a3b8',
+                    font=('Segoe UI', 9)).pack()
+            fp_dialog.update()
+
+            import fingerprint as fp_mod
+            verified_count = 0
+            for j in judgments:
+                gi = j.get('group_index')
+                clusters = j.get('clusters', [])
+                if gi is None or gi >= len(groups):
+                    continue
+                group = groups[gi]
+                new_clusters = []
+                for cluster in clusters:
+                    if len(cluster) < 2:
+                        new_clusters.append(cluster)
+                        continue
+                    cluster_paths = [group[idx][0] for idx in cluster if idx < len(group)]
+                    if len(cluster_paths) < 2:
+                        new_clusters.append(cluster)
+                        continue
+                    # 计算指纹并比对
+                    fp0 = fp_mod.compute_fingerprint(cluster_paths[0])
+                    if fp0 is None:
+                        new_clusters.append(cluster)  # 无法计算，保留 AI 结果
+                        continue
+                    match_groups = [[cluster[0]]]
+                    for idx in cluster[1:]:
+                        path = group[idx][0]
+                        fp = fp_mod.compute_fingerprint(path)
+                        if fp is None or fp == fp0:
+                            match_groups[-1].append(idx)
+                        else:
+                            match_groups.append([idx])
+                    new_clusters.extend(match_groups)
+                    verified_count += 1
+                    fp_var.set(f"已验证 {verified_count} 个聚类...")
+                    fp_dialog.update()
+                j['clusters'] = new_clusters  # 更新为指纹验证后的聚类
+            fp_dialog.destroy()
 
         if not judgments:
             messagebox.showinfo("AI 分析", "AI 未返回有效结果")
