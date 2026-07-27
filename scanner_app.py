@@ -1139,7 +1139,6 @@ class MusicScannerWithTasks(tk.Tk):
 
     def _save_session(self):
         """保存当前会话状态到 JSON"""
-        import json
         session = {
             'last_task_id': self.current_task.task_id if self.current_task else None,
             'folder_a': self.path_a_var.get().strip(),
@@ -1156,7 +1155,6 @@ class MusicScannerWithTasks(tk.Tk):
 
     def _load_session(self):
         """从 JSON 恢复上次会话状态"""
-        import json
         session_path = get_app_dir() / "last_session.json"
         if not session_path.exists():
             return
@@ -1625,7 +1623,6 @@ class MusicScannerWithTasks(tk.Tk):
         if not path:
             return
         try:
-            import json
             data = self.task_manager.export_all_data()
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1642,7 +1639,6 @@ class MusicScannerWithTasks(tk.Tk):
         if not path:
             return
         try:
-            import json
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             imported, skipped = self.task_manager.import_all_data(data)
