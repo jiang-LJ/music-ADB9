@@ -305,13 +305,14 @@ class MusicScannerWithTasks(tk.Tk):
         self.smart_single_side = tk.BooleanVar(value=False)
 
         # 音频指纹验证（默认关闭）
-        self.use_fingerprint = tk.BooleanVar(value=False)
+        self.use_fingerprint = tk.BooleanVar(value=True)
 
         # AI 分析配置
         self.ai_config_path = get_app_dir() / "ai_config.json"
         self.ai_config: dict = {}
         self.file_tags: Dict[str, dict] = {}  # path -> {title, artist}
-        self.ai_judgments: Optional[List[dict]] = None  # AI 分析结果
+        self.ai_judgments: Optional[List[dict]] = None  # AI 分析结果（最新）
+        self.ai_history: List[dict] = []  # AI 分析历史记录
         # 指纹缓存
         self.fingerprint_cache_path = get_app_dir() / "fingerprint_cache.json"
         self.fingerprint_cache: dict = {}
@@ -360,7 +361,7 @@ class MusicScannerWithTasks(tk.Tk):
         top_frame.columnconfigure(2, weight=0, minsize=225)   # 操作（加宽50%）
         top_frame.columnconfigure(3, weight=0, minsize=300)   # 扫描结果概览
         top_frame.columnconfigure(4, weight=0, minsize=300)   # 快速选择（加宽）
-        top_frame.columnconfigure(5, weight=0, minsize=225)   # AI 应用（与操作栏同宽）
+        top_frame.columnconfigure(5, weight=0, minsize=170)   # AI 应用（与操作栏同宽）
 
         # 左栏：任务管理
         task_frame = tk.LabelFrame(top_frame, text="📋 任务管理",
@@ -805,9 +806,9 @@ class MusicScannerWithTasks(tk.Tk):
         container = tk.Frame(quick_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=3)
 
-        # 上下两区均分垂直空间
-        container.grid_rowconfigure(0, weight=1)
-        container.grid_rowconfigure(1, weight=1)
+        # 上半区3行 : 下半区2行 = 3:2，使5行等高
+        container.grid_rowconfigure(0, weight=3)
+        container.grid_rowconfigure(1, weight=2)
         container.grid_columnconfigure(0, weight=1)
 
         btn_cfg = dict(
@@ -824,14 +825,17 @@ class MusicScannerWithTasks(tk.Tk):
             activeforeground=self.colors['text']
         )
 
-        # ===== 上半区：筛选条件 + 单侧/指纹 + 统计 =====
+        # ===== 上半区：筛选条件 + 单侧/指纹 + 统计（3行等高）=====
         top_frame = tk.Frame(container, bg=self.colors['card'])
         top_frame.grid(row=0, column=0, sticky='nsew', padx=8, pady=8)
+        top_frame.grid_rowconfigure(0, weight=1)
+        top_frame.grid_rowconfigure(1, weight=1)
+        top_frame.grid_rowconfigure(2, weight=1)
         top_frame.grid_columnconfigure(0, weight=1)
         top_frame.grid_columnconfigure(1, weight=1)
 
         cond_frame = tk.Frame(top_frame, bg=self.colors['card'])
-        cond_frame.grid(row=0, column=0, columnspan=2, sticky='ew', padx=10, pady=(10, 5))
+        cond_frame.grid(row=0, column=0, columnspan=2, sticky='nsew', padx=10, pady=5)
         cond_frame.grid_columnconfigure(0, weight=1)
         cond_frame.grid_columnconfigure(1, weight=1)
         cond_frame.grid_columnconfigure(2, weight=1)
@@ -904,7 +908,7 @@ class MusicScannerWithTasks(tk.Tk):
             relief='raised', bd=1
         )
 
-        # 按钮居中区域（不填满，宽度约40%）
+        # 按钮居中区域
         btn_wrap = tk.Frame(container, bg=self.colors['card'])
         btn_wrap.pack(expand=True)
 
@@ -912,11 +916,11 @@ class MusicScannerWithTasks(tk.Tk):
                 bg=self.colors['card'], fg=self.colors['accent'],
                 font=('Segoe UI', 9, 'bold')).pack(pady=(8, 4))
         tk.Button(btn_wrap, text="API 配置", command=self._configure_api,
-                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
         tk.Button(btn_wrap, text="AI 分析", command=self._run_ai_analysis,
-                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
         tk.Button(btn_wrap, text="导出列表", command=self._export_list_to_txt,
-                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
 
         tk.Label(btn_wrap, text="学习",
                 bg=self.colors['card'], fg=self.colors['accent'],
@@ -925,13 +929,13 @@ class MusicScannerWithTasks(tk.Tk):
                   command=lambda: messagebox.showinfo(
                       "反馈已记录",
                       f"已记录 {self._record_feedback()} 个手动保留的文件"),
-                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
         tk.Button(btn_wrap, text="导出规则", command=self._export_ai_rules,
-                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
         tk.Button(btn_wrap, text="清除记录",
                   command=lambda: [self.clear_feedback(),
                                    messagebox.showinfo("已清除", "已清除所有反馈记录")],
-                  **btn_ai).pack(pady=2, padx=8, fill=tk.X)
+                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
 
     def setup_bottom_result_panel(self, parent):
         """底部通栏结果区：统一左右 A/B 分栏"""
@@ -1806,10 +1810,8 @@ class MusicScannerWithTasks(tk.Tk):
             messagebox.showinfo("提示", "未在选中的文件夹中找到音频文件")
             return
 
-        self.show_estimate_dialog(
-            estimated_files, estimated_seconds,
-            lambda: self.show_scan_progress_dialog(scan_type, scan_config)
-        )
+        # 直接开始扫描（跳过预估确认弹窗）
+        self.show_scan_progress_dialog(scan_type, scan_config)
 
     def estimate_scan_time(self, scan_config: dict) -> Tuple[int, float]:
         """快速估算扫描文件数量和耗时（仅计数，不读音频时长，不阻塞 UI）"""
@@ -3204,6 +3206,12 @@ class MusicScannerWithTasks(tk.Tk):
                 progress_callback=_on_progress
             )
             self.ai_judgments = judgments  # 保存 AI 结果供导出使用
+            self.ai_history.append({
+                'time': datetime.now().isoformat(),
+                'view': vt,
+                'judgments': judgments,
+                'total_groups': total_groups,
+            })
         except Exception as e:
             progress_dialog.destroy()
             messagebox.showerror("AI 分析失败", str(e))
@@ -3219,91 +3227,9 @@ class MusicScannerWithTasks(tk.Tk):
             messagebox.showinfo("AI 分析", "AI 未返回有效结果")
             return
 
-        # 处理结果：按聚类处理（AI 返回每组的文件聚类）
-        same_count = 0
-        diff_count = 0
-        error_count = 0
-        checked_paths = set()
-
-        for j in judgments:
-            gi = j.get('group_index')
-            # group_index=-1 表示该批分析失败
-            if gi == -1:
-                error_count += 1
-                continue
-            if gi is None or gi >= len(groups):
-                continue
-
-            clusters = j.get('clusters', [])
-            if not clusters:
-                continue
-
-            group = groups[gi]
-            total_in_group = len(group)
-            clustered_count = sum(len(c) for c in clusters)
-
-            # 每个 cluster 代表一组同一首歌
-            for cluster in clusters:
-                if len(cluster) < 2:
-                    # 单个文件：不同歌曲，不做操作
-                    diff_count += 1
-                    continue
-
-                # 该 cluster 内是同一首歌的不同版本
-                same_count += 1
-                cluster_paths = [group[idx][0] for idx in cluster if idx < total_in_group]
-                if len(cluster_paths) < 2:
-                    continue
-
-                cluster_a = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_a]
-                cluster_b = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_b]
-                all_cluster_items = cluster_a + cluster_b
-
-                if not all_cluster_items:
-                    continue
-
-                # 用智选去重的逻辑保留最优文件
-                candidates = all_cluster_items[:]
-                use_duration = self.smart_use_duration.get()
-                use_size = self.smart_use_size.get()
-                use_mtime = self.smart_use_mtime.get()
-
-                # Live 版优先删除：同cluster内 Live 版与非 Live 版时长差≤5秒时，保留非 Live 版
-                live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
-                non_live_cands = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
-                if live_cands and non_live_cands:
-                    for _, li in live_cands:
-                        for _, ni in non_live_cands:
-                            ld = li.get('duration')
-                            nd = ni.get('duration')
-                            if ld is not None and nd is not None and abs(ld - nd) <= 5:
-                                candidates = non_live_cands
-                                break
-                        else:
-                            continue
-                        break
-
-                if use_duration:
-                    with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
-                    if with_dur:
-                        max_dur = max(i['duration'] for _, i in with_dur)
-                        candidates = [(p, i) for p, i in with_dur if i['duration'] == max_dur]
-
-                if use_size and len(candidates) > 1:
-                    max_sz = max(i['size'] for _, i in candidates)
-                    candidates = [(p, i) for p, i in candidates if i['size'] == max_sz]
-
-                if use_mtime and len(candidates) > 1:
-                    max_mt = max(i['mtime'] for _, i in candidates)
-                    candidates = [(p, i) for p, i in candidates if i['mtime'] == max_mt]
-
-                # A 侧优先
-                a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
-                keep = a_cand[0][0] if a_cand else candidates[0][0]
-
-                for path, _ in all_cluster_items:
-                    if path != keep and path not in self.user_feedback:
-                        checked_paths.add(path)
+        # 应用聚类结果（勾选/保留逻辑）
+        same_count, diff_count, error_count, checked_paths = self._apply_ai_clusters(
+            judgments, groups, vt)
 
         if not checked_paths:
             msg = f"AI 分析了 {total_groups} 组"
@@ -3314,11 +3240,9 @@ class MusicScannerWithTasks(tk.Tk):
             messagebox.showinfo("AI 分析", msg)
             return
 
-        # 切换到当前视图并勾选
         self.switch_result_view(vt)
         trees = [self.result_tree_a, self.result_tree_b]
 
-        # 清空旧勾选
         for tree in trees:
             self.checked_items[id(tree)] = set()
             for item in tree.get_children():
@@ -3343,6 +3267,92 @@ class MusicScannerWithTasks(tk.Tk):
             summary += f"\n⚠ {error_count} 批分析失败（可重新运行 AI 分析重试）"
         summary += "\n\n请检查勾选结果后移入回收站"
         messagebox.showinfo("AI 分析完成", summary)
+
+    def _apply_ai_clusters(self, judgments: list, groups: list, vt: str) -> tuple:
+        """
+        根据 AI 聚类结果计算应勾选的文件路径。
+
+        Returns:
+            (same_count, diff_count, error_count, checked_paths)
+        """
+        same_count = 0
+        diff_count = 0
+        error_count = 0
+        checked_paths = set()
+
+        for j in judgments:
+            gi = j.get('group_index')
+            if gi == -1:
+                error_count += 1
+                continue
+            if gi is None or gi >= len(groups):
+                continue
+
+            clusters = j.get('clusters', [])
+            if not clusters:
+                continue
+
+            group = groups[gi]
+            total_in_group = len(group)
+
+            for cluster in clusters:
+                if len(cluster) < 2:
+                    diff_count += 1
+                    continue
+
+                same_count += 1
+                cluster_paths = [group[idx][0] for idx in cluster if idx < total_in_group]
+                if len(cluster_paths) < 2:
+                    continue
+
+                cluster_a = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_a]
+                cluster_b = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_b]
+                all_items = cluster_a + cluster_b
+                if not all_items:
+                    continue
+
+                # 选最优文件
+                candidates = all_items[:]
+                use_duration = self.smart_use_duration.get()
+                use_size = self.smart_use_size.get()
+                use_mtime = self.smart_use_mtime.get()
+
+                live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
+                non_live = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
+                if live_cands and non_live:
+                    for _, li in live_cands:
+                        for _, ni in non_live:
+                            ld = li.get('duration')
+                            nd = ni.get('duration')
+                            if ld is not None and nd is not None and abs(ld - nd) <= 5:
+                                candidates = non_live
+                                break
+                        else:
+                            continue
+                        break
+
+                if use_duration:
+                    wd = [(p, i) for p, i in candidates if i.get('duration') is not None]
+                    if wd:
+                        md = max(i['duration'] for _, i in wd)
+                        candidates = [(p, i) for p, i in wd if i['duration'] == md]
+
+                if use_size and len(candidates) > 1:
+                    ms = max(i['size'] for _, i in candidates)
+                    candidates = [(p, i) for p, i in candidates if i['size'] == ms]
+
+                if use_mtime and len(candidates) > 1:
+                    mm = max(i['mtime'] for _, i in candidates)
+                    candidates = [(p, i) for p, i in candidates if i['mtime'] == mm]
+
+                a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
+                keep = a_cand[0][0] if a_cand else candidates[0][0]
+
+                for path, _ in all_items:
+                    if path != keep and path not in self.user_feedback:
+                        checked_paths.add(path)
+
+        return same_count, diff_count, error_count, checked_paths
 
     def _verify_fingerprints(self, judgments: list, groups: list):
         """

@@ -20,6 +20,10 @@ BATCH_SIZE = 20
 
 
 
+# 常见不可用标签值（空值、Track编号、"未知"等）
+_UNUSABLE_TAGS = {'', 'unknown', 'untitled', 'track', '无标题', '未知', '未命名'}
+
+
 def _extract_title_key(name: str) -> Optional[str]:
     """
     从文件名中提取歌曲名关键词（去除歌手前缀）。
@@ -87,17 +91,29 @@ def _precluster_by_filename(group: list, file_tags: Dict[str, dict]) -> Optional
         tags = file_tags.get(path, {})
         title_from_tag = tags.get('title')
         if title_from_tag and title_from_tag.strip():
-            key = title_from_tag.strip().lower()
-            # 同样去除末尾括号内容
-            key = re.sub(r'\s*[（(][^）)]*[）)]$', '', key).strip()
-            # 含"伴奏"的标记为不同 key
-            name = info.get('name', '')
-            if '伴奏' in name:
-                key += '__acc'
-            title_keys.setdefault(key, []).append(idx)
-            continue
+            tag_val = title_from_tag.strip().lower()
+            # 检查标签是否可用：排除通用占位值和太短的内容
+            tag_usable = True
+            if tag_val in _UNUSABLE_TAGS or len(tag_val) < 2:
+                tag_usable = False
+            # 排除 "Track 1", "track01", "曲目 1" 等编号格式
+            if re.match(r'^(track|曲目|音轨)\s*\d+$', tag_val):
+                tag_usable = False
+            # 排除纯数字或纯符号
+            if re.match(r'^[\d\s\-_./\\#]+$', tag_val):
+                tag_usable = False
+
+            if tag_usable:
+                key = tag_val
+                # 同样去除末尾括号内容
+                key = re.sub(r'\s*[（(][^）)]*[）)]$', '', key).strip()
+                name = info.get('name', '')
+                if '伴奏' in name:
+                    key += '__acc'
+                title_keys.setdefault(key, []).append(idx)
+                continue
         
-        # 从文件名提取
+        # 标签不可用 → fallback 到文件名提取
         name = info.get('name', '')
         key = _extract_title_key(name)
         if key:
