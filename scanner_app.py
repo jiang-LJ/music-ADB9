@@ -904,18 +904,15 @@ class MusicScannerWithTasks(tk.Tk):
         container = tk.Frame(help_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # ── AI 分析区域 ──
+        # 两列布局：左→AI分析，右→反馈学习
+        col_frame = tk.Frame(container, bg=self.colors['card'])
+        col_frame.pack(fill=tk.BOTH, expand=True)
 
-        ai_frame = tk.Frame(container, bg=self.colors['card'])
-        ai_frame.pack(expand=True, pady=15)
+        left_frame = tk.Frame(col_frame, bg=self.colors['card'])
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 2))
 
-        tk.Label(ai_frame, text="─ AI 分析 ─",
-                bg=self.colors['card'], fg=self.colors['accent'],
-                font=('Segoe UI', 9, 'bold')).pack()
-
-        tk.Label(ai_frame, text="歌曲名→歌手→时长",
-                bg=self.colors['card'], fg='#94a3b8',
-                font=('Segoe UI', 8)).pack()
+        right_frame = tk.Frame(col_frame, bg=self.colors['card'])
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(2, 0))
 
         btn_cfg_ai = dict(
             bg=self.colors['border'], fg=self.colors['text'],
@@ -923,42 +920,56 @@ class MusicScannerWithTasks(tk.Tk):
             width=14, relief='raised', bd=1
         )
 
-        btn_api = tk.Button(ai_frame, text="🔑 API 配置",
+        # ── 左列：AI 分析 ──
+        tk.Label(left_frame, text="─ AI 分析 ─",
+                bg=self.colors['card'], fg=self.colors['accent'],
+                font=('Segoe UI', 9, 'bold')).pack(pady=(5, 2))
+        tk.Label(left_frame, text="歌曲名→歌手→时长",
+                bg=self.colors['card'], fg='#94a3b8',
+                font=('Segoe UI', 8)).pack()
+
+        btn_api = tk.Button(left_frame, text="🔑 API 配置",
                             command=self._configure_api, **btn_cfg_ai)
         btn_api.pack(pady=(8, 4))
         Tooltip(btn_api, "配置 AI 服务的 API Endpoint、Key 和模型")
 
-        btn_ai = tk.Button(ai_frame, text="🤖 AI 分析",
+        btn_ai = tk.Button(left_frame, text="🤖 AI 分析",
                            command=self._run_ai_analysis, **btn_cfg_ai)
         btn_ai.pack(pady=(4, 2))
-        Tooltip(btn_ai, "将当前视图的分组发送到 AI 分析是否同一首歌，自动勾选应去重文件")
+        Tooltip(btn_ai, "将当前视图的分组发送到 AI 分析，自动勾选应去重文件")
 
-        btn_export = tk.Button(ai_frame, text="📄 列表导出",
+        btn_export = tk.Button(left_frame, text="📄 列表导出",
                                command=self._export_list_to_txt, **btn_cfg_ai)
         btn_export.pack(pady=(4, 2))
         Tooltip(btn_export, "导出 AI 分析结果 CSV（需先运行 AI 分析）")
 
-        tk.Label(ai_frame, text="─ 反馈学习 ─",
+        # ── 右列：反馈学习 ──
+        tk.Label(right_frame, text="─ 反馈学习 ─",
                 bg=self.colors['card'], fg=self.colors['accent'],
-                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 2))
-        tk.Label(ai_frame, text="记录手动调整，下次自动跳过",
+                font=('Segoe UI', 9, 'bold')).pack(pady=(5, 2))
+        tk.Label(right_frame, text="记录手动调整，下次自动跳过",
                 bg=self.colors['card'], fg='#94a3b8',
                 font=('Segoe UI', 8)).pack()
 
-        btn_learn = tk.Button(ai_frame, text="📝 记住调整",
+        btn_learn = tk.Button(right_frame, text="📝 记住调整",
                               command=lambda: messagebox.showinfo(
                                   "反馈已记录",
                                   f"已记录 {self._record_feedback()} 个手动保留的文件，"
                                   "下次 AI 分析将自动跳过"),
                               **btn_cfg_ai)
-        btn_learn.pack(pady=(2, 2))
+        btn_learn.pack(pady=(12, 4))
         Tooltip(btn_learn, "记录当前手动取消勾选的文件，下次 AI 分析跳过")
 
-        btn_clear = tk.Button(ai_frame, text="🗑️ 清除记录",
+        btn_export_rules = tk.Button(right_frame, text="📤 导出规则",
+                                     command=self._export_ai_rules, **btn_cfg_ai)
+        btn_export_rules.pack(pady=(4, 4))
+        Tooltip(btn_export_rules, "导出 AI 分析规则文本，用于后续版本预设")
+
+        btn_clear = tk.Button(right_frame, text="🗑️ 清除记录",
                               command=lambda: [self.clear_feedback(),
                                                messagebox.showinfo("已清除", "所有反馈记录已清除")],
                               **btn_cfg_ai)
-        btn_clear.pack(pady=(2, 4))
+        btn_clear.pack(pady=(4, 4))
         Tooltip(btn_clear, "清除所有反馈学习记录")
 
     def setup_bottom_result_panel(self, parent):
@@ -3445,6 +3456,34 @@ class MusicScannerWithTasks(tk.Tk):
                     json.dump(self.fingerprint_cache, f, ensure_ascii=False)
             except Exception:
                 pass
+
+    def _export_ai_rules(self):
+        """导出 AI 分析规则文本到文件"""
+        import ai_analyzer
+        prompt = ai_analyzer.get_system_prompt()
+        rules_text = (
+            "# ABD9 AI 分析规则\n"
+            f"# 导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            "# 将此文件交给开发者，可在下次更新时预设进软件\n"
+            "#" + "=" * 58 + "\n\n"
+            f"{prompt}\n\n"
+            "#" + "=" * 60 + "\n"
+            "# ABD9音乐文件筛查器"
+        )
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            initialfile=f"ai_rules_{datetime.now().strftime('%Y%m%d')}.txt",
+            filetypes=[("文本文件", "*.txt")],
+            title="导出 AI 规则"
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(rules_text)
+            messagebox.showinfo("导出成功", f"AI 分析规则已导出到:\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e))
 
     def _export_list_to_txt(self):
         """将 AI 分析结果导出为 CSV（无 AI 结果时提示先运行）"""

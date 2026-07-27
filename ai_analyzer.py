@@ -141,27 +141,12 @@ def _build_batch_prompt(batch_groups: list, global_start: int,
     return "\n".join(lines)
 
 
-def _call_batch_api(
-    batch_groups: list,
-    global_start: int,
-    file_tags: Dict[str, dict],
-    config: dict,
-    batch_index: int,
-    total_batches: int,
-) -> List[dict]:
+def get_system_prompt() -> str:
     """
-    发送一批分组到 AI API 并解析返回
-
-    Returns:
-        [{"group_index": int, "same_song": bool, "reason": str}, ...]
+    返回 AI 分析的系统提示词（即判断规则全文）。
+    可供导出和查看。
     """
-    endpoint = config.get('endpoint', '').rstrip('/')
-    api_key = config.get('api_key', '')
-    model = config.get('model', 'gpt-4o-mini')
-
-    group_text = _build_batch_prompt(batch_groups, global_start, file_tags)
-
-    system_prompt = (
+    return (
         "你是一个音乐文件分析助手。你的任务是从以下三个维度综合判断每组文件"
         "是否为「同一首歌」的不同版本（如不同格式、不同码率、不同音量、"
         "伴奏版/原版、Live版等），还是「不同的歌曲」。\n\n"
@@ -203,6 +188,29 @@ def _call_batch_api(
         "### 输出要求：\n"
         "请严格按 JSON 格式返回，不要包含其它文字。"
     )
+
+
+def _call_batch_api(
+    batch_groups: list,
+    global_start: int,
+    file_tags: Dict[str, dict],
+    config: dict,
+    batch_index: int,
+    total_batches: int,
+) -> List[dict]:
+    """
+    发送一批分组到 AI API 并解析返回
+
+    Returns:
+        [{"group_index": int, "same_song": bool, "reason": str}, ...]
+    """
+    endpoint = config.get('endpoint', '').rstrip('/')
+    api_key = config.get('api_key', '')
+    model = config.get('model', 'gpt-4o-mini')
+
+    group_text = _build_batch_prompt(batch_groups, global_start, file_tags)
+
+    system_prompt = get_system_prompt()
 
     user_prompt = (
         f"以下共有 {len(batch_groups)} 组文件。请分析每组内哪些文件属于同一首歌。\n\n"
