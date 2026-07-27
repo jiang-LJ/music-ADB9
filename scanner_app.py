@@ -2097,7 +2097,6 @@ class MusicScannerWithTasks(tk.Tk):
         for path, duration in results:
             if path in files and duration is not None:
                 files[path]['duration'] = duration
-                files[path]['duration'] = duration
 
     def _apply_cached_md5(self, files: Dict[str, dict], changes: List[FileState]):
         """将历史缓存的 MD5 透传到当前文件字典（未变更/移动文件）"""
@@ -2731,46 +2730,8 @@ class MusicScannerWithTasks(tk.Tk):
             # 候选列表，逐步缩小范围
             candidates = all_items[:]
 
-            # 伴奏版优先：文件名含"伴奏"的优先保留
-            acc = [(p, i) for p, i in candidates if '伴奏' in i.get('name', '')]
-            if acc:
-                candidates = acc
-
-            # Live 版优先删除：同cluster内 Live 版与非 Live 版时长差≤5秒时，保留非 Live 版
-            live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
-            non_live_cands = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
-            if live_cands and non_live_cands:
-                for _, li in live_cands:
-                    for _, ni in non_live_cands:
-                        ld = li.get('duration')
-                        nd = ni.get('duration')
-                        if ld is not None and nd is not None and abs(ld - nd) <= 5:
-                            candidates = non_live_cands
-                            break
-                    else:
-                        continue
-                    break
-
-            if use_duration:
-                with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
-                if with_dur:
-                    max_dur = max(i['duration'] for _, i in with_dur)
-                    candidates = [(p, i) for p, i in with_dur if i['duration'] == max_dur]
-
-            if use_size and len(candidates) > 1:
-                max_sz = max(i['size'] for _, i in candidates)
-                candidates = [(p, i) for p, i in candidates if i['size'] == max_sz]
-
-            if use_mtime and len(candidates) > 1:
-                max_mt = max(i['mtime'] for _, i in candidates)
-                candidates = [(p, i) for p, i in candidates if i['mtime'] == max_mt]
-
-            # 最终保留：A侧优先
-            a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
-            if a_cand:
-                keep = a_cand[0][0]
-            else:
-                keep = candidates[0][0]
+            # 用共享规则选出最优文件
+            keep = self._pick_best_file(candidates)
 
             # 其余全部勾选
             for path, _ in all_items:
@@ -3312,47 +3273,65 @@ class MusicScannerWithTasks(tk.Tk):
                     continue
 
                 # 选最优文件
-                candidates = all_items[:]
-                use_duration = self.smart_use_duration.get()
-                use_size = self.smart_use_size.get()
-                use_mtime = self.smart_use_mtime.get()
-
-                live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
-                non_live = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
-                if live_cands and non_live:
-                    for _, li in live_cands:
-                        for _, ni in non_live:
-                            ld = li.get('duration')
-                            nd = ni.get('duration')
-                            if ld is not None and nd is not None and abs(ld - nd) <= 5:
-                                candidates = non_live
-                                break
-                        else:
-                            continue
-                        break
-
-                if use_duration:
-                    wd = [(p, i) for p, i in candidates if i.get('duration') is not None]
-                    if wd:
-                        md = max(i['duration'] for _, i in wd)
-                        candidates = [(p, i) for p, i in wd if i['duration'] == md]
-
-                if use_size and len(candidates) > 1:
-                    ms = max(i['size'] for _, i in candidates)
-                    candidates = [(p, i) for p, i in candidates if i['size'] == ms]
-
-                if use_mtime and len(candidates) > 1:
-                    mm = max(i['mtime'] for _, i in candidates)
-                    candidates = [(p, i) for p, i in candidates if i['mtime'] == mm]
-
-                a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
-                keep = a_cand[0][0] if a_cand else candidates[0][0]
+                keep = self._pick_best_file(all_items)
+                if not keep:
+                    continue
 
                 for path, _ in all_items:
                     if path != keep and path not in self.user_feedback:
                         checked_paths.add(path)
 
         return same_count, diff_count, error_count, checked_paths
+
+    def _pick_best_file(self, candidates: list) -> Optional[str]:
+        """
+        从候选文件列表中按规则选出应保留的最优文件。
+        规则：伴奏版优先 → Live版删除(≤5s) → 时长最大 → 文件最大 → 最新文件 → A侧优先
+        """
+        if not candidates:
+            return None
+
+        cands = candidates[:]
+        use_duration = self.smart_use_duration.get()
+        use_size = self.smart_use_size.get()
+        use_mtime = self.smart_use_mtime.get()
+
+        # 伴奏版优先
+        acc = [(p, i) for p, i in cands if '伴奏' in i.get('name', '')]
+        if acc:
+            cands = acc
+
+        # Live 版优先删除
+        live = [(p, i) for p, i in cands if 'live' in i.get('name', '').lower()]
+        non_live = [(p, i) for p, i in cands if 'live' not in i.get('name', '').lower()]
+        if live and non_live:
+            for _, li in live:
+                for _, ni in non_live:
+                    ld = li.get('duration')
+                    nd = ni.get('duration')
+                    if ld is not None and nd is not None and abs(ld - nd) <= 5:
+                        cands = non_live
+                        break
+                else:
+                    continue
+                break
+
+        if use_duration:
+            wd = [(p, i) for p, i in cands if i.get('duration') is not None]
+            if wd:
+                md = max(i['duration'] for _, i in wd)
+                cands = [(p, i) for p, i in wd if i['duration'] == md]
+
+        if use_size and len(cands) > 1:
+            ms = max(i['size'] for _, i in cands)
+            cands = [(p, i) for p, i in cands if i['size'] == ms]
+
+        if use_mtime and len(cands) > 1:
+            mm = max(i['mtime'] for _, i in cands)
+            cands = [(p, i) for p, i in cands if i['mtime'] == mm]
+
+        a_cand = [(p, i) for p, i in cands if p in self.all_files_a]
+        return a_cand[0][0] if a_cand else cands[0][0]
 
     def _verify_fingerprints(self, judgments: list, groups: list):
         """
@@ -3506,50 +3485,6 @@ class MusicScannerWithTasks(tk.Tk):
                 s = '"' + s.replace('"', '""') + '"'
             return s
 
-        def _pick_keep(group):
-            """按智选规则从组中选出应保留的文件路径"""
-            a_items = [(p, i) for p, i in group if p in self.all_files_a]
-            b_items = [(p, i) for p, i in group if p in self.all_files_b]
-            all_items = a_items + b_items
-            if not all_items:
-                return None
-
-            candidates = all_items[:]
-            use_duration = self.smart_use_duration.get()
-            use_size = self.smart_use_size.get()
-            use_mtime = self.smart_use_mtime.get()
-
-            # Live 版优先删除：同cluster内 Live 版与非 Live 版时长差≤5秒时，保留非 Live 版
-            live_cands = [(p, i) for p, i in candidates if 'live' in i.get('name', '').lower()]
-            non_live_cands = [(p, i) for p, i in candidates if 'live' not in i.get('name', '').lower()]
-            if live_cands and non_live_cands:
-                for _, li in live_cands:
-                    for _, ni in non_live_cands:
-                        ld = li.get('duration')
-                        nd = ni.get('duration')
-                        if ld is not None and nd is not None and abs(ld - nd) <= 5:
-                            candidates = non_live_cands
-                            break
-                    else:
-                        continue
-                    break
-
-            if use_duration:
-                with_dur = [(p, i) for p, i in candidates if i.get('duration') is not None]
-                if with_dur:
-                    max_dur = max(i['duration'] for _, i in with_dur)
-                    candidates = [(p, i) for p, i in with_dur if i['duration'] == max_dur]
-
-            if use_size and len(candidates) > 1:
-                max_sz = max(i['size'] for _, i in candidates)
-                candidates = [(p, i) for p, i in candidates if i['size'] == max_sz]
-
-            if use_mtime and len(candidates) > 1:
-                max_mt = max(i['mtime'] for _, i in candidates)
-                candidates = [(p, i) for p, i in candidates if i['mtime'] == max_mt]
-
-            a_cand = [(p, i) for p, i in candidates if p in self.all_files_a]
-            return a_cand[0][0] if a_cand else candidates[0][0]
 
         lines = []
         # 文件头注释
@@ -3574,6 +3509,10 @@ class MusicScannerWithTasks(tk.Tk):
                         if j.get('group_index') == gi:
                             ai_clusters = j.get('clusters')
                             break
+
+                def _pick_keep(group):
+                    all_items = [(p, i) for p, i in group]
+                    return self._pick_best_file(all_items)
 
                 if ai_clusters and vt in ('sim', 'approx'):
                     # 用 AI 聚类：每个 cluster 内同歌，跨 cluster 不同歌

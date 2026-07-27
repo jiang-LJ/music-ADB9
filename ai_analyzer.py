@@ -32,7 +32,6 @@ def _extract_title_key(name: str) -> Optional[str]:
     含"伴奏"的文件会被标记为不同 key，与原版区分开。
     末尾括号内的版本说明会被去除，使同歌不同版本归为同一 key。
     """
-    import re
     stem = name.rsplit('.', 1)[0] if '.' in name else name
 
     # 去除开头 [FLAC] [MP3] 等格式标记

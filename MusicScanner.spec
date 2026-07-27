@@ -10,9 +10,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-    optimize=0,
+    excludes=['numpy'],
+    noarchive=False,    optimize=0,
 )
 pyz = PYZ(a.pure)
 

@@ -9,8 +9,6 @@ Phase 1 单元测试
 import os
 import time
 import pytest
-import tempfile
-from pathlib import Path
 
 from utils import (
     compute_md5,
