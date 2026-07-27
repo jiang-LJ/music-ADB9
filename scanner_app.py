@@ -827,11 +827,16 @@ class MusicScannerWithTasks(tk.Tk):
         btn_qb.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
         Tooltip(btn_qb, "在当前视图（重复/相似/近似）中一键选中所有文件夹B的文件")
 
-        # Row 1: 智选去重 + 单侧去重勾选
+        # Row 1: 智选去重 + 取消选择（两个按钮，与 Row 0 风格一致）
         btn_smart = tk.Button(top_frame, text="智选去重",
                               command=self.smart_select, **btn_cfg)
-        btn_smart.grid(row=1, column=0, padx=(10, 2), pady=10, sticky='nsew')
+        btn_smart.grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
         Tooltip(btn_smart, "根据下方勾选的条件，在每组中智能保留最优文件，其余勾选")
+
+        cancel_btn = tk.Button(top_frame, text="取消选择",
+                               command=self.clear_selection, **btn_cfg)
+        cancel_btn.grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
+        Tooltip(cancel_btn, "取消所有已选中的文件")
 
         cb_cfg = dict(
             bg=self.colors['card'], fg=self.colors['text'],
@@ -841,20 +846,12 @@ class MusicScannerWithTasks(tk.Tk):
             activeforeground=self.colors['text']
         )
 
-        cb_single = tk.Checkbutton(top_frame, text="单侧去重",
-                                   variable=self.smart_single_side, **cb_cfg)
-        cb_single.grid(row=1, column=1, padx=(2, 10), pady=10, sticky='w')
-        Tooltip(cb_single, "不勾选→仅显示两侧文件数量相等的组（无空行）；勾选→仅显示数量不等的单侧/跨侧组（有空行）")
-        # 勾选单侧去重时自动调整相似度和时长阈值
-        cb_single.configure(command=self._on_single_side_toggled)
-
         # Row 2: 三个筛选条件复选框（横排）
         cond_frame = tk.Frame(top_frame, bg=self.colors['card'])
         cond_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=10, pady=(0, 8))
         cond_frame.grid_columnconfigure(0, weight=1)
         cond_frame.grid_columnconfigure(1, weight=1)
         cond_frame.grid_columnconfigure(2, weight=1)
-        cond_frame.grid_columnconfigure(3, weight=1)
 
         tk.Checkbutton(cond_frame, text="最大时长", variable=self.smart_use_duration,
                        **cb_cfg).grid(row=0, column=0, sticky='w')
@@ -862,24 +859,28 @@ class MusicScannerWithTasks(tk.Tk):
                        **cb_cfg).grid(row=0, column=1, sticky='w')
         tk.Checkbutton(cond_frame, text="最新文件", variable=self.smart_use_mtime,
                        **cb_cfg).grid(row=0, column=2, sticky='w')
-        tk.Checkbutton(cond_frame, text="音频指纹", variable=self.use_fingerprint,
-                       **cb_cfg).grid(row=0, column=3, sticky='w')
-        Tooltip(cond_frame.winfo_children()[-1],
-                "勾选后 AI 分析时用 Chromaprint 音频指纹验证聚类结果，"
-                "排除文件名相似但音频内容不同的文件")
 
-        # ===== 下半区：取消选择 | 统计 =====
+        # ===== 下半区：单侧 | 指纹 | 统计 =====
         bottom_frame = tk.Frame(container, bg=self.colors['card'])
         bottom_frame.grid(row=1, column=0, sticky='nsew', padx=8, pady=8)
         bottom_frame.grid_columnconfigure(0, weight=1)
         bottom_frame.grid_columnconfigure(1, weight=1)
 
-        cancel_btn = tk.Button(bottom_frame, text="取消选择",
-                               command=self.clear_selection, **btn_cfg)
-        cancel_btn.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
-        Tooltip(cancel_btn, "取消所有已选中的文件")
+        cb_single = tk.Checkbutton(bottom_frame, text="单侧去重",
+                                   variable=self.smart_single_side, **cb_cfg)
+        cb_single.grid(row=0, column=0, padx=(10, 2), pady=(10, 2), sticky='w')
+        Tooltip(cb_single, "不勾选→仅显示两侧文件数量相等的组（无空行）；勾选→仅显示数量不等的单侧/跨侧组（有空行）")
+        cb_single.configure(command=self._on_single_side_toggled)
+
+        cb_fp = tk.Checkbutton(bottom_frame, text="音频指纹",
+                               variable=self.use_fingerprint, **cb_cfg)
+        cb_fp.grid(row=1, column=0, padx=(10, 2), pady=(0, 10), sticky='w')
+        Tooltip(cb_fp,
+                "勾选后 AI 分析时用 Chromaprint 音频指纹验证聚类结果，"
+                "排除文件名相似但音频内容不同的文件")
 
         stat_frame = tk.Frame(bottom_frame, bg=self.colors['card'])
+        stat_frame.grid(row=0, column=1, rowspan=2, padx=10, pady=10, sticky='nsew')
         stat_frame.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
         self.selection_var = tk.StringVar(value="已选择: 0 个文件")
         self.selection_detail_var = tk.StringVar(value="(A: 0, B: 0)")
@@ -2067,37 +2068,57 @@ class MusicScannerWithTasks(tk.Tk):
             if c.path in files and c.duration is not None:
                 files[c.path]['duration'] = c.duration
 
-    def _read_durations(self, files: Dict[str, dict], progress_callback=None):
-        """按需读取音频时长和标签，仅当启用时长过滤时执行（多线程并行）"""
-        if not self.scan_options['use_duration'].get():
-            return
+    def _read_audio_metadata(self, files: Dict[str, dict], progress_callback=None):
+        """
+        读取音频文件的时长和标签。
+        时长：仅在启用时长过滤时读取
+        标签（title/artist）：始终读取（预聚类和 AI 分析需要）
+        """
+        read_duration = self.scan_options['use_duration'].get()
 
-        paths = [p for p, info in files.items() if info.get('duration') is None]
+        # 确定需要读取的文件
+        paths = []
+        for p, info in files.items():
+            need_dur = read_duration and info.get('duration') is None
+            need_tags = p not in self.file_tags or not self.file_tags.get(p)
+            if need_dur or need_tags:
+                paths.append((p, need_dur, need_tags))
+
         if not paths:
             return
 
         total = len(paths)
         workers = max(1, min(32, self.worker_count_var.get()))
 
-        def _worker(i_path):
-            idx, path = i_path
+        def _worker(item):
+            path, need_dur, need_tags = item
+            duration = None
             try:
-                duration = get_audio_duration(path)
-                # 一并读取标签
-                tags = get_audio_tags(path)
-                self.file_tags[path] = tags
+                if need_dur and need_tags:
+                    # 需要时长和标签 → 同时读取
+                    duration = get_audio_duration(path)
+                    tags = get_audio_tags(path)
+                    self.file_tags[path] = tags
+                elif need_tags:
+                    # 只需要标签
+                    tags = get_audio_tags(path)
+                    self.file_tags[path] = tags
+                elif need_dur:
+                    # 只需要时长
+                    duration = get_audio_duration(path)
             except Exception:
-                duration = None
+                pass
             if progress_callback and total > 0:
-                progress_callback(35 + int(15 * (idx + 1) / total),
-                                  f"正在读取音频时长 ({idx + 1}/{total})...")
+                pct = 35 + int(15 * (paths.index((path, need_dur, need_tags)) + 1) / total)
+                progress_callback(pct, f"正在读取音频信息 ({paths.index((path, need_dur, need_tags)) + 1}/{total})...")
             return path, duration
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            results = list(ex.map(_worker, enumerate(paths)))
+            results = list(ex.map(_worker, paths))
 
         for path, duration in results:
-            if path in files:
+            if path in files and duration is not None:
+                files[path]['duration'] = duration
                 files[path]['duration'] = duration
 
     def _apply_cached_md5(self, files: Dict[str, dict], changes: List[FileState]):
@@ -2229,7 +2250,7 @@ class MusicScannerWithTasks(tk.Tk):
             files_to_read_duration_a = files_to_process_a
             files_to_read_duration_b = files_to_process_b
 
-        self._read_durations({**files_to_read_duration_a, **files_to_read_duration_b}, progress_callback=_report)
+        self._read_audio_metadata({**files_to_read_duration_a, **files_to_read_duration_b}, progress_callback=_report)
 
         # 4. 计算 MD5：应用缓存 + 多线程仅计算新增/修改文件
         _report(50, "正在计算 MD5...")
@@ -3166,52 +3187,7 @@ class MusicScannerWithTasks(tk.Tk):
 
         # 音频指纹验证（勾选后对 AI 聚类结果做硬件指纹比对）
         if self.use_fingerprint.get() and judgments:
-            fp_dialog = self._create_dialog("音频指纹验证", 350, 100)
-            tk.Label(fp_dialog, text="正在进行音频指纹验证...",
-                    bg=self.colors['card'], fg=self.colors['text'],
-                    font=('Segoe UI', 10)).pack(pady=(20, 5))
-            fp_var = tk.StringVar(value="计算中...")
-            tk.Label(fp_dialog, textvariable=fp_var,
-                    bg=self.colors['card'], fg='#94a3b8',
-                    font=('Segoe UI', 9)).pack()
-            fp_dialog.update()
-
-            import fingerprint as fp_mod
-            verified_count = 0
-            for j in judgments:
-                gi = j.get('group_index')
-                clusters = j.get('clusters', [])
-                if gi is None or gi >= len(groups):
-                    continue
-                group = groups[gi]
-                new_clusters = []
-                for cluster in clusters:
-                    if len(cluster) < 2:
-                        new_clusters.append(cluster)
-                        continue
-                    cluster_paths = [group[idx][0] for idx in cluster if idx < len(group)]
-                    if len(cluster_paths) < 2:
-                        new_clusters.append(cluster)
-                        continue
-                    # 计算指纹并比对
-                    fp0 = fp_mod.compute_fingerprint(cluster_paths[0])
-                    if fp0 is None:
-                        new_clusters.append(cluster)  # 无法计算，保留 AI 结果
-                        continue
-                    match_groups = [[cluster[0]]]
-                    for idx in cluster[1:]:
-                        path = group[idx][0]
-                        fp = fp_mod.compute_fingerprint(path)
-                        if fp is None or fp == fp0:
-                            match_groups[-1].append(idx)
-                        else:
-                            match_groups.append([idx])
-                    new_clusters.extend(match_groups)
-                    verified_count += 1
-                    fp_var.set(f"已验证 {verified_count} 个聚类...")
-                    fp_dialog.update()
-                j['clusters'] = new_clusters  # 更新为指纹验证后的聚类
-            fp_dialog.destroy()
+            self._verify_fingerprints(judgments, groups)
 
         if not judgments:
             messagebox.showinfo("AI 分析", "AI 未返回有效结果")
@@ -3341,6 +3317,57 @@ class MusicScannerWithTasks(tk.Tk):
             summary += f"\n⚠ {error_count} 批分析失败（可重新运行 AI 分析重试）"
         summary += "\n\n请检查勾选结果后移入回收站"
         messagebox.showinfo("AI 分析完成", summary)
+
+    def _verify_fingerprints(self, judgments: list, groups: list):
+        """
+        对 AI 聚类结果做音频指纹验证。
+        同一 cluster 内指纹不一致的文件拆分为独立 cluster。
+        """
+        fp_dialog = self._create_dialog("音频指纹验证", 350, 100)
+        tk.Label(fp_dialog, text="正在进行音频指纹验证...",
+                bg=self.colors['card'], fg=self.colors['text'],
+                font=('Segoe UI', 10)).pack(pady=(20, 5))
+        fp_var = tk.StringVar(value="计算中...")
+        tk.Label(fp_dialog, textvariable=fp_var,
+                bg=self.colors['card'], fg='#94a3b8',
+                font=('Segoe UI', 9)).pack()
+        fp_dialog.update()
+
+        import fingerprint as fp_mod
+        verified_count = 0
+        for j in judgments:
+            gi = j.get('group_index')
+            clusters = j.get('clusters', [])
+            if gi is None or gi >= len(groups):
+                continue
+            group = groups[gi]
+            new_clusters = []
+            for cluster in clusters:
+                if len(cluster) < 2:
+                    new_clusters.append(cluster)
+                    continue
+                cluster_paths = [group[idx][0] for idx in cluster if idx < len(group)]
+                if len(cluster_paths) < 2:
+                    new_clusters.append(cluster)
+                    continue
+                fp0 = fp_mod.compute_fingerprint(cluster_paths[0])
+                if fp0 is None:
+                    new_clusters.append(cluster)
+                    continue
+                match_groups = [[cluster[0]]]
+                for idx in cluster[1:]:
+                    path = group[idx][0]
+                    fp = fp_mod.compute_fingerprint(path)
+                    if fp is None or fp == fp0:
+                        match_groups[-1].append(idx)
+                    else:
+                        match_groups.append([idx])
+                new_clusters.extend(match_groups)
+                verified_count += 1
+                fp_var.set(f"已验证 {verified_count} 个聚类...")
+                fp_dialog.update()
+            j['clusters'] = new_clusters
+        fp_dialog.destroy()
 
     def _export_list_to_txt(self):
         """将 AI 分析结果导出为 CSV（无 AI 结果时提示先运行）"""

@@ -50,12 +50,14 @@ def _extract_title_key(name: str) -> Optional[str]:
 
 def _normalize_title(title: str, full_name: str = '') -> str:
     """
-    规范化歌曲名：去除末尾括号内容、转小写。
+    规范化歌曲名：去除末尾括号内容、去除末尾纯数字、转小写。
     含"伴奏"的追加 __acc 后缀，与原件区分。
     """
     title = title.strip().lower()
     # 去除末尾括号内容，如 (Explicit)、(片刻)、（伴奏）等
     title = re.sub(r'\s*[（(][^）)]*[）)]$', '', title).strip()
+    # 去除末尾纯数字（如 "See You Again 1" → "See You Again"）
+    title = re.sub(r'\s+\d+$', '', title).strip()
     # 含"伴奏"的标记为不同 key
     if '伴奏' in full_name:
         title += '__acc'
