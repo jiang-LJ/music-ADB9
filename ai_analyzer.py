@@ -30,6 +30,12 @@ def _extract_title_key(name: str) -> Optional[str]:
     """
     import re
     stem = name.rsplit('.', 1)[0] if '.' in name else name
+
+    # 去除开头 [FLAC] [MP3] 等格式标记
+    stem = re.sub(r'^\[[^\]]*\]\s*', '', stem).strip()
+    # 去除开头 "001. " "01 " 等序号前缀
+    stem = re.sub(r'^\d+[\.\s]+\s*', '', stem).strip()
+
     # 优先 " - " 分隔（最常用）
     if ' - ' in stem:
         parts = stem.split(' - ', 1)
@@ -124,9 +130,13 @@ def _build_batch_prompt(batch_groups: list, global_start: int,
             name = info.get('name', '?')
             title = tags.get('title') or '?'
             artist = tags.get('artist') or '?'
+            album = tags.get('album') or '?'
+            bitrate = tags.get('bitrate')
+            bitrate_str = f"{bitrate // 1000}k" if bitrate else '?'
+            year = tags.get('year') or '?'
             dur = format_duration(info.get('duration'))
             size = f"{info.get('size', 0) / 1024:.0f}KB"
-            lines.append(f"  - {name} | 标题:{title} | 歌手:{artist} | 时长:{dur} | 大小:{size}")
+            lines.append(f"  - {name} | 标题:{title} | 歌手:{artist} | 专辑:{album} | 码率:{bitrate_str} | 年代:{year} | 时长:{dur} | 大小:{size}")
         lines.append("")
     return "\n".join(lines)
 

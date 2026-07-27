@@ -312,6 +312,14 @@ class MusicScannerWithTasks(tk.Tk):
         self.ai_config: dict = {}
         self.file_tags: Dict[str, dict] = {}  # path -> {title, artist}
         self.ai_judgments: Optional[List[dict]] = None  # AI 分析结果
+        # 指纹缓存
+        self.fingerprint_cache_path = get_app_dir() / "fingerprint_cache.json"
+        self.fingerprint_cache: dict = {}
+        self._load_fingerprint_cache()
+        # 用户反馈学习（记录手动保留的文件）
+        self.feedback_path = get_app_dir() / "user_feedback.json"
+        self.user_feedback: set = set()
+        self._load_feedback()
         self._load_ai_config()
 
         # 扫描结果数据
@@ -956,6 +964,29 @@ class MusicScannerWithTasks(tk.Tk):
                                command=self._export_list_to_txt, **btn_cfg_ai)
         btn_export.pack(pady=(4, 2))
         Tooltip(btn_export, "导出 AI 分析结果 CSV（需先运行 AI 分析）")
+
+        tk.Label(ai_frame, text="─ 反馈学习 ─",
+                bg=self.colors['card'], fg=self.colors['accent'],
+                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 2))
+        tk.Label(ai_frame, text="记录手动调整，下次自动跳过",
+                bg=self.colors['card'], fg='#94a3b8',
+                font=('Segoe UI', 8)).pack()
+
+        btn_learn = tk.Button(ai_frame, text="📝 记住调整",
+                              command=lambda: messagebox.showinfo(
+                                  "反馈已记录",
+                                  f"已记录 {self._record_feedback()} 个手动保留的文件，"
+                                  "下次 AI 分析将自动跳过"),
+                              **btn_cfg_ai)
+        btn_learn.pack(pady=(2, 2))
+        Tooltip(btn_learn, "记录当前手动取消勾选的文件，下次 AI 分析跳过")
+
+        btn_clear = tk.Button(ai_frame, text="🗑️ 清除记录",
+                              command=lambda: [self.clear_feedback(),
+                                               messagebox.showinfo("已清除", "所有反馈记录已清除")],
+                              **btn_cfg_ai)
+        btn_clear.pack(pady=(2, 4))
+        Tooltip(btn_clear, "清除所有反馈学习记录")
 
     def setup_bottom_result_panel(self, parent):
         """底部通栏结果区：统一左右 A/B 分栏"""
@@ -3066,6 +3097,56 @@ class MusicScannerWithTasks(tk.Tk):
         except Exception:
             self.ai_config = {}
 
+    def _load_fingerprint_cache(self):
+        """加载指纹缓存文件"""
+        try:
+            if self.fingerprint_cache_path.exists():
+                with open(self.fingerprint_cache_path, 'r', encoding='utf-8') as f:
+                    self.fingerprint_cache = json.load(f)
+        except Exception:
+            self.fingerprint_cache = {}
+
+    def _load_feedback(self):
+        """加载用户反馈记录"""
+        try:
+            if self.feedback_path.exists():
+                with open(self.feedback_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.user_feedback = set(data.get('keep', []))
+        except Exception:
+            self.user_feedback = set()
+
+    def _save_feedback(self):
+        """保存用户反馈记录"""
+        try:
+            with open(self.feedback_path, 'w', encoding='utf-8') as f:
+                json.dump({'keep': list(self.user_feedback)}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _record_feedback(self):
+        """
+        记录用户当前的手动调整：扫描当前 Treeview，
+        将用户手动保留的文件（应为☑但用户改为☐的文件）加入反馈。
+        """
+        recorded = 0
+        for tree in (self.result_tree_a, self.result_tree_b):
+            for item in tree.get_children():
+                text = tree.item(item, 'text')
+                iid = tree.item(item, 'iid') if hasattr(tree, 'item') else ''
+                # 如果 AI 之前勾选了但用户取消了 → 记录为保留
+                if text == '☐' and item in self.checked_items.get(id(tree), set()):
+                    self.user_feedback.add(item)
+                    recorded += 1
+        if recorded:
+            self._save_feedback()
+        return recorded
+
+    def clear_feedback(self):
+        """清除所有用户反馈记录"""
+        self.user_feedback.clear()
+        self._save_feedback()
+
     def _save_ai_config(self, endpoint: str, api_key: str, model: str):
         """保存 AI 配置（含主机名绑定）"""
         cfg = {
@@ -3276,7 +3357,7 @@ class MusicScannerWithTasks(tk.Tk):
                 keep = a_cand[0][0] if a_cand else candidates[0][0]
 
                 for path, _ in all_cluster_items:
-                    if path != keep:
+                    if path != keep and path not in self.user_feedback:
                         checked_paths.add(path)
 
         if not checked_paths:
@@ -3322,6 +3403,7 @@ class MusicScannerWithTasks(tk.Tk):
         """
         对 AI 聚类结果做音频指纹验证。
         同一 cluster 内指纹不一致的文件拆分为独立 cluster。
+        指纹结果缓存到本地文件，避免重复计算。
         """
         fp_dialog = self._create_dialog("音频指纹验证", 350, 100)
         tk.Label(fp_dialog, text="正在进行音频指纹验证...",
@@ -3334,7 +3416,20 @@ class MusicScannerWithTasks(tk.Tk):
         fp_dialog.update()
 
         import fingerprint as fp_mod
+        new_cache = {}  # 存本次新计算的指纹
         verified_count = 0
+
+        def _get_fp(path):
+            """从缓存或计算获取指纹"""
+            if path in self.fingerprint_cache:
+                return self.fingerprint_cache[path]
+            if path in new_cache:
+                return new_cache[path]
+            fp = fp_mod.compute_fingerprint(path)
+            if fp:
+                new_cache[path] = fp
+            return fp
+
         for j in judgments:
             gi = j.get('group_index')
             clusters = j.get('clusters', [])
@@ -3350,14 +3445,14 @@ class MusicScannerWithTasks(tk.Tk):
                 if len(cluster_paths) < 2:
                     new_clusters.append(cluster)
                     continue
-                fp0 = fp_mod.compute_fingerprint(cluster_paths[0])
+                fp0 = _get_fp(cluster_paths[0])
                 if fp0 is None:
                     new_clusters.append(cluster)
                     continue
                 match_groups = [[cluster[0]]]
                 for idx in cluster[1:]:
                     path = group[idx][0]
-                    fp = fp_mod.compute_fingerprint(path)
+                    fp = _get_fp(path)
                     if fp is None or fp == fp0:
                         match_groups[-1].append(idx)
                     else:
@@ -3368,6 +3463,15 @@ class MusicScannerWithTasks(tk.Tk):
                 fp_dialog.update()
             j['clusters'] = new_clusters
         fp_dialog.destroy()
+
+        # 保存新计算的指纹到缓存
+        if new_cache:
+            self.fingerprint_cache.update(new_cache)
+            try:
+                with open(self.fingerprint_cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.fingerprint_cache, f, ensure_ascii=False)
+            except Exception:
+                pass
 
     def _export_list_to_txt(self):
         """将 AI 分析结果导出为 CSV（无 AI 结果时提示先运行）"""

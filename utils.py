@@ -149,16 +149,22 @@ def get_audio_duration(filepath: str) -> Optional[float]:
 
 def get_audio_tags(filepath: str) -> dict:
     """
-    读取音频文件的 title 和 artist 标签。
+    读取音频文件的 title, artist, album, bitrate, year。
     优先 tinytag，fallback mutagen。
 
     Returns:
-        {'title': str or None, 'artist': str or None}
+        {'title': ..., 'artist': ..., 'album': ..., 'bitrate': ..., 'year': ...}
     """
     try:
         from tinytag import TinyTag
         tag = TinyTag.get(filepath)
-        return {'title': tag.title, 'artist': tag.artist}
+        return {
+            'title': tag.title,
+            'artist': tag.artist,
+            'album': tag.album,
+            'bitrate': tag.bitrate,
+            'year': tag.year,
+        }
     except Exception:
         pass
     try:
@@ -169,29 +175,35 @@ def get_audio_tags(filepath: str) -> dict:
         from mutagen.mp4 import MP4
         audio = File(filepath)
         if audio is None:
-            return {'title': None, 'artist': None}
+            return {'title': None, 'artist': None, 'album': None, 'bitrate': None, 'year': None}
 
-        title = None
-        artist = None
+        title = None; artist = None; album = None; year = None
+        bitrate = audio.info.bitrate if hasattr(audio.info, 'bitrate') else None
 
         if isinstance(audio, MP3):
             title = audio.get('TIT2', [None])[0] if 'TIT2' in audio else None
             artist = audio.get('TPE1', [None])[0] if 'TPE1' in audio else None
+            album = audio.get('TALB', [None])[0] if 'TALB' in audio else None
+            year = audio.get('TDRC', [None])[0] if 'TDRC' in audio else None
         elif isinstance(audio, FLAC) or isinstance(audio, OggVorbis):
             title = audio.get('title', [None])[0] if audio.get('title') else None
             artist = audio.get('artist', [None])[0] if audio.get('artist') else None
+            album = audio.get('album', [None])[0] if audio.get('album') else None
+            year = audio.get('date', [None])[0] if audio.get('date') else None
         elif isinstance(audio, MP4):
             title = audio.get('\xa9nam', [None])[0] if '\xa9nam' in audio else None
             artist = audio.get('\xa9ART', [None])[0] if '\xa9ART' in audio else None
+            album = audio.get('\xa9alb', [None])[0] if '\xa9alb' in audio else None
+            year = audio.get('\xa9day', [None])[0] if '\xa9day' in audio else None
         else:
             # 通用 fallback
             title = audio.get('title', None)
             artist = audio.get('artist', None)
 
-        return {'title': title, 'artist': artist}
+        return {'title': title, 'artist': artist, 'album': album, 'bitrate': bitrate, 'year': year}
     except Exception:
         pass
-    return {'title': None, 'artist': None}
+    return {'title': None, 'artist': None, 'album': None, 'bitrate': None, 'year': None}
 
 
 def format_duration(seconds: Optional[float]) -> str:

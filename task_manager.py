@@ -143,7 +143,15 @@ class TaskManager:
                 cursor.execute('ALTER TABLE file_states ADD COLUMN duration REAL')
                 cursor.execute('PRAGMA user_version = 2')
             except sqlite3.OperationalError:
-                pass  # 字段已存在
+                pass
+
+        # 兼容旧数据库：添加 fingerprint 字段
+        if version < 3:
+            try:
+                cursor.execute('ALTER TABLE file_states ADD COLUMN fingerprint TEXT')
+                cursor.execute('PRAGMA user_version = 3')
+            except sqlite3.OperationalError:
+                pass
 
         # 创建索引
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_task ON file_states(task_id)')
