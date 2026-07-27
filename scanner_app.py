@@ -904,27 +904,31 @@ class MusicScannerWithTasks(tk.Tk):
             relief='raised', bd=1
         )
 
-        tk.Label(container, text="AI 分析",
+        # 按钮居中区域（不填满，宽度约40%）
+        btn_wrap = tk.Frame(container, bg=self.colors['card'])
+        btn_wrap.pack(expand=True)
+
+        tk.Label(btn_wrap, text="AI 分析",
                 bg=self.colors['card'], fg=self.colors['accent'],
                 font=('Segoe UI', 9, 'bold')).pack(pady=(8, 4))
-        tk.Button(container, text="API 配置", command=self._configure_api,
+        tk.Button(btn_wrap, text="API 配置", command=self._configure_api,
                   **btn_ai).pack(pady=2, padx=8, fill=tk.X)
-        tk.Button(container, text="AI 分析", command=self._run_ai_analysis,
+        tk.Button(btn_wrap, text="AI 分析", command=self._run_ai_analysis,
                   **btn_ai).pack(pady=2, padx=8, fill=tk.X)
-        tk.Button(container, text="导出列表", command=self._export_list_to_txt,
+        tk.Button(btn_wrap, text="导出列表", command=self._export_list_to_txt,
                   **btn_ai).pack(pady=2, padx=8, fill=tk.X)
 
-        tk.Label(container, text="学习",
+        tk.Label(btn_wrap, text="学习",
                 bg=self.colors['card'], fg=self.colors['accent'],
                 font=('Segoe UI', 9, 'bold')).pack(pady=(10, 4))
-        tk.Button(container, text="记住调整",
+        tk.Button(btn_wrap, text="记住调整",
                   command=lambda: messagebox.showinfo(
                       "反馈已记录",
                       f"已记录 {self._record_feedback()} 个手动保留的文件"),
                   **btn_ai).pack(pady=2, padx=8, fill=tk.X)
-        tk.Button(container, text="导出规则", command=self._export_ai_rules,
+        tk.Button(btn_wrap, text="导出规则", command=self._export_ai_rules,
                   **btn_ai).pack(pady=2, padx=8, fill=tk.X)
-        tk.Button(container, text="清除记录",
+        tk.Button(btn_wrap, text="清除记录",
                   command=lambda: [self.clear_feedback(),
                                    messagebox.showinfo("已清除", "已清除所有反馈记录")],
                   **btn_ai).pack(pady=2, padx=8, fill=tk.X)
