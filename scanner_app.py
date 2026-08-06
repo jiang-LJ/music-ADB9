@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import random
+import re
 import shutil
 import threading
 import time
@@ -727,7 +728,7 @@ class MusicScannerWithTasks(tk.Tk):
                     if view_type == 'rename':
                         def _open_rename(e):
                             self.switch_result_view('rename')
-                            self._open_rename_manager()
+                            self._open_long_name_analyzer()
                         lbl.bind('<Button-1>', _open_rename)
                     else:
                         lbl.bind('<Button-1>', lambda e, v=view_type: self.switch_result_view(v))
@@ -3671,6 +3672,140 @@ class MusicScannerWithTasks(tk.Tk):
             target = os.path.join(folder, f"{base}({n}){ext}")
             n += 1
         return target
+
+    def _open_long_name_analyzer(self):
+        """超长文件分析窗：阈值默认 120 可调，即时刷新列出超长文件，可批量删除或进入下一步"""
+        dlg = self._create_dialog("超长文件分析", 780, 540)
+        frame = tk.Frame(dlg, bg=self.colors['card'])
+        frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
+
+        # 顶部：阈值输入 + 说明
+        top = tk.Frame(frame, bg=self.colors['card'])
+        top.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(top, text="超长阈值（文件名 ≥）", bg=self.colors['card'],
+                 fg=self.colors['text'], font=('Segoe UI', 10)).pack(side=tk.LEFT)
+        threshold_var = tk.StringVar(value='120')
+        thr_entry = tk.Entry(top, textvariable=threshold_var, width=8,
+                             font=('Consolas', 10), bg='#d1d5db', fg='#1f2937',
+                             highlightthickness=0, justify='center')
+        thr_entry.pack(side=tk.LEFT, padx=(6, 2))
+        tk.Label(top, text="字符", bg=self.colors['card'], fg=self.colors['text'],
+                 font=('Segoe UI', 10)).pack(side=tk.LEFT)
+        tk.Label(top, text="超长文件可能影响路径上限与显示，建议处理",
+                 bg=self.colors['card'], fg=self.colors['accent2'],
+                 font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=(12, 0))
+
+        count_label = tk.Label(frame, text="超长文件: 0 个",
+                               bg=self.colors['card'], fg=self.colors['text'],
+                               font=('Segoe UI', 10, 'bold'))
+        count_label.pack(anchor='w', pady=(0, 4))
+
+        list_frame = tk.Frame(frame, bg=self.colors['card'])
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        lb = tk.Listbox(list_frame, selectmode=tk.EXTENDED,
+                        font=('Consolas', 9), bg='#d1d5db', fg='#1f2937',
+                        highlightthickness=0, activestyle='none')
+        sb = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=lb.yview)
+        lb.config(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # 当前命中列表 [(path, name)]，与列表行对应
+        hits = []
+        deleted = {'n': 0}
+
+        def _all_long_paths(thr):
+            out = []
+            for d in (self.all_files_a, self.all_files_b):
+                for path, info in d.items():
+                    name = info.get('name', '')
+                    if name and len(name) >= thr:
+                        out.append((path, name))
+            out.sort(key=lambda x: len(x[1]), reverse=True)
+            return out
+
+        def _refresh():
+            try:
+                thr = int(threshold_var.get())
+                if thr < 1:
+                    raise ValueError
+            except (ValueError, TypeError):
+                count_label.config(text="超长文件: 无效阈值")
+                return
+            hits.clear()
+            for path, name in _all_long_paths(thr):
+                hits.append((path, name))
+            lb.delete(0, tk.END)
+            for path, name in hits:
+                lb.insert(tk.END, f"{len(name):>4}  {name}")
+            count_label.config(text=f"超长文件: {len(hits)} 个（阈值 ≥ {thr} 字符）")
+            if hits:
+                lb.selection_set(0, tk.END)  # 默认全选
+
+        def _on_key(e):
+            # 只允许数字
+            if not threshold_var.get().isdigit():
+                threshold_var.set(re.sub(r'\D', '', threshold_var.get()))
+            _refresh()
+
+        thr_entry.bind('<KeyRelease>', _on_key)
+        _refresh()
+
+        btn_bar = tk.Frame(frame, bg=self.colors['card'])
+        btn_bar.pack(fill=tk.X, pady=(10, 0))
+
+        def _batch_delete():
+            if not hits:
+                return
+            sel = lb.curselection()
+            if not sel:
+                return
+            targets = [hits[i][0] for i in sel]
+            ok = messagebox.askyesno(
+                "批量删除确认",
+                f"确定将 {len(targets)} 个超长文件移入回收站？\n\n（可在回收站中还原，删除后不参与后续重命名）",
+                parent=dlg)
+            if not ok:
+                return
+            try:
+                if send_to_trash(targets):
+                    for i in sorted(sel, reverse=True):
+                        p = hits[i][0]
+                        if p in self.all_files_a:
+                            del self.all_files_a[p]
+                        if p in self.all_files_b:
+                            del self.all_files_b[p]
+                    deleted['n'] += len(targets)
+                    # 同步刷新概览统计
+                    self.overview_vars['rename_pending'].set(str(self._count_rename_pending()))
+                    if hasattr(self, 'a_stats_var'):
+                        self.a_stats_var.set(f"📀 {len(self.all_files_a)} 个文件")
+                    if hasattr(self, 'b_stats_var'):
+                        self.b_stats_var.set(f"💿 {len(self.all_files_b)} 个文件")
+                    messagebox.showinfo("删除完成",
+                                        f"已移入回收站 {len(targets)} 个文件",
+                                        parent=dlg)
+                    _refresh()
+                else:
+                    messagebox.showwarning("删除失败", "部分文件未能移入回收站", parent=dlg)
+            except Exception as e:
+                messagebox.showerror("删除失败", str(e), parent=dlg)
+
+        def _next():
+            dlg.destroy()
+            self._open_rename_manager()
+
+        btn_cfg = dict(bg=self.colors['border'], fg='white', font=('Segoe UI', 10, 'bold'),
+                       cursor='hand2')
+        tk.Button(btn_bar, text="批量删除（移入回收站）", command=_batch_delete,
+                  bg='#ef4444', fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_bar, text="下一步（重命名管理）", command=_next,
+                  bg='#22c55e', fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.RIGHT, padx=4)
+        tk.Button(btn_bar, text="关闭", command=dlg.destroy, **btn_cfg).pack(side=tk.RIGHT, padx=4)
+
+        dlg.protocol('WM_DELETE_WINDOW', dlg.destroy)
 
     def _open_rename_manager(self):
         """打开重命名管理弹窗（重命名 + 恢复）"""
