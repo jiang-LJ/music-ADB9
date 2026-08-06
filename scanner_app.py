@@ -221,9 +221,9 @@ HELP_CONTENT = """
   • 撤销移动：将最近一次移入回收站的文件恢复至原来的路径
 
 【结果视图切换】
-  • 点击扫描结果概览区的彩色数字可切换视图：重复文件 / 相似文件 / 近似文件 / 聚合去重 / 全部
+  • 点击扫描结果概览区的彩色数字可切换视图：重复文件 / 相似文件 / 近似文件 / 聚合去重
   • 概览区各数字含义：
-    - 总文件数：文件夹 A 和文件夹 B 中的文件总数（点击切换为全部视图）
+    - 待重命名：文件名不符合命名规范的文件数（点击打开重命名管理）
     - 重复文件：内容完全相同的文件总数
     - 相似文件：文件名相同但内容可能不同的文件总数
     - 近似文件：文件名相似且时长接近的文件总数
@@ -325,6 +325,10 @@ class MusicScannerWithTasks(tk.Tk):
         self.use_learning = tk.BooleanVar(value=False)
         # 选live版：默认勾选，优先勾选 Live 版（保留原版）
         self.use_live_priority = tk.BooleanVar(value=True)
+        # 重命名日志
+        self.rename_log_path = get_app_dir() / "rename_log.json"
+        self.rename_log: List[dict] = []
+        self._load_rename_log()
         self._load_ai_config()
 
         # 扫描结果数据
@@ -666,7 +670,7 @@ class MusicScannerWithTasks(tk.Tk):
         """填充扫描结果概览（V12：6项垂直堆叠，文字左数字右，可点击切换视图）"""
         self.overview_vars = {}
         items = [
-            ('total_files', '总文件数', '#0ea5e9', 'all'),
+            ('rename_pending', '待重命名', '#0ea5e9', 'rename'),
             ('duplicate_groups', '重复文件', '#ef4444', 'dup'),
             ('similar_groups', '相似文件', '#f59e0b', 'sim'),
             ('approximate_groups', '近似文件', '#a855f7', 'approx'),
@@ -679,7 +683,7 @@ class MusicScannerWithTasks(tk.Tk):
         inner.pack(fill=tk.X, expand=True)
 
         tooltip_texts = {
-            'total_files': '文件夹 A 和文件夹 B 中的文件总数（点击可切换为全部视图）',
+            'rename_pending': '文件名不符合命名规范的文件数（点击打开重命名管理）',
             'duplicate_groups': '内容完全相同的文件总数（点击仅显示重复文件）',
             'similar_groups': '文件名相同但内容可能不同的文件总数（点击仅显示相似文件）',
             'approximate_groups': '文件名相似且时长接近的文件总数（点击仅显示近似文件）',
@@ -716,11 +720,14 @@ class MusicScannerWithTasks(tk.Tk):
                 for lbl in (text_lbl, num_lbl):
                     Tooltip(lbl, tip)
 
-            # 绑定点击
+            # 绑定点击（rename 特殊：打开重命名管理弹窗）
             if view_type:
                 for lbl in (dot_lbl, text_lbl, num_lbl):
                     lbl.config(cursor='hand2')
-                    lbl.bind('<Button-1>', lambda e, v=view_type: self.switch_result_view(v))
+                    if view_type == 'rename':
+                        lbl.bind('<Button-1>', lambda e: self._open_rename_manager())
+                    else:
+                        lbl.bind('<Button-1>', lambda e, v=view_type: self.switch_result_view(v))
 
         # 底部居中导出按钮（导出当前视图列表为 CSV）
         btn_frame = tk.Frame(overview_frame, bg=overview_frame.cget('bg'))
@@ -1967,14 +1974,14 @@ class MusicScannerWithTasks(tk.Tk):
                 self.refresh_results(self._last_scan_config, self._last_stats_a,
                                      self._last_stats_b, self._last_duration)
                 self.show_toast("✅ 扫描完成")
-                total = self.overview_vars['total_files'].get()
+                rename = self.overview_vars['rename_pending'].get()
                 dup = self.overview_vars['duplicate_groups'].get()
                 sim = self.overview_vars['similar_groups'].get()
                 approx = self.overview_vars['approximate_groups'].get()
                 agg = self.overview_vars['agg_files'].get()
                 dur = self.overview_vars['duration'].get()
                 result_msg = (
-                    f"总文件数: {total}\n"
+                    f"待重命名: {rename}\n"
                     f"重复文件: {dup}\n"
                     f"相似文件: {sim}\n"
                     f"近似文件: {approx}\n"
@@ -2367,13 +2374,12 @@ class MusicScannerWithTasks(tk.Tk):
 
     def refresh_results(self, scan_config, stats_a, stats_b, duration):
         """刷新结果展示（V12修正：统一显示文件个数而非组数）"""
-        total = len(self.all_files_a) + len(self.all_files_b)
         dup_files = sum(len(g) for g in self.duplicate_groups)
         sim_files = sum(len(g) for g in self.similar_groups)
         approx_files = sum(len(g) for g in self.approximate_groups)
         agg = dup_files + sim_files + approx_files
 
-        self.overview_vars['total_files'].set(str(total))
+        self.overview_vars['rename_pending'].set(str(self._count_rename_pending()))
         self.overview_vars['duplicate_groups'].set(str(dup_files))
         self.overview_vars['similar_groups'].set(str(sim_files))
         self.overview_vars['approximate_groups'].set(str(approx_files))
@@ -3518,6 +3524,272 @@ class MusicScannerWithTasks(tk.Tk):
                     json.dump(self.fingerprint_cache, f, ensure_ascii=False)
             except Exception:
                 pass
+
+    # ==================== 文件重命名（待重命名） ====================
+
+    def _count_rename_pending(self) -> int:
+        """统计当前任务中文件名不符合命名规范的文件数"""
+        import rename_utils
+        count = 0
+        for d in (self.all_files_a, self.all_files_b):
+            for info in d.values():
+                name = info.get('name', '')
+                if name and rename_utils.should_rename(name):
+                    count += 1
+        return count
+
+    def _load_rename_log(self):
+        """加载重命名日志（用于恢复功能）"""
+        try:
+            if self.rename_log_path.exists():
+                with open(self.rename_log_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.rename_log = data.get('entries', [])
+        except Exception:
+            self.rename_log = []
+
+    def _save_rename_log(self):
+        """保存重命名日志"""
+        try:
+            with open(self.rename_log_path, 'w', encoding='utf-8') as f:
+                json.dump({'entries': self.rename_log}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _build_rename_plan(self) -> list:
+        """构建待重命名计划 [(old_path, old_name, new_name), ...]"""
+        import rename_utils
+        plan = []
+        for d in (self.all_files_a, self.all_files_b):
+            for path, info in d.items():
+                name = info.get('name', '')
+                if not name:
+                    continue
+                new_name = rename_utils.build_new_filename(name)
+                if new_name != name:
+                    plan.append((path, name, new_name))
+        return plan
+
+    def _unique_target_path(self, folder: str, new_name: str, old_path: str) -> str:
+        """目标文件名冲突时自动加后缀 (1)、(2)…"""
+        target = os.path.join(folder, new_name)
+        n = 1
+        while os.path.exists(target) and target != old_path:
+            base, ext = os.path.splitext(new_name)
+            target = os.path.join(folder, f"{base}({n}){ext}")
+            n += 1
+        return target
+
+    def _open_rename_manager(self):
+        """打开重命名管理弹窗（重命名 + 恢复）"""
+        dlg = self._create_dialog("重命名管理", 780, 560)
+        dlg.transient(self)
+        dlg.grab_set()
+
+        btn_cfg = dict(
+            bg=self.colors['border'], fg=self.colors['text'],
+            font=('Segoe UI', 9), cursor='hand2',
+            relief='raised', bd=1
+        )
+
+        # 顶部：页面切换
+        top_bar = tk.Frame(dlg, bg=self.colors['card'])
+        top_bar.pack(fill=tk.X, padx=10, pady=(10, 4))
+        tab_rename = tk.Button(top_bar, text="重命名", **btn_cfg)
+        tab_rename.pack(side=tk.LEFT, padx=2)
+        tab_restore = tk.Button(top_bar, text="恢复", **btn_cfg)
+        tab_restore.pack(side=tk.LEFT, padx=2)
+
+        # ── 重命名页 ──
+        rename_frame = tk.Frame(dlg, bg=self.colors['card'])
+        plan = self._build_rename_plan()
+
+        info_label = tk.Label(rename_frame, text=f"待重命名: {len(plan)} 个文件（勾选后执行）",
+                              bg=self.colors['card'], fg=self.colors['text'],
+                              font=('Segoe UI', 10))
+        info_label.pack(anchor='w', padx=10, pady=(2, 4))
+
+        list_frame = tk.Frame(rename_frame, bg=self.colors['card'])
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10)
+        lb = tk.Listbox(list_frame, selectmode=tk.EXTENDED,
+                        font=('Consolas', 9), bg='#d1d5db', fg='#1f2937',
+                        highlightthickness=0, activestyle='none')
+        sb = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=lb.yview)
+        lb.config(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        for old_path, old_name, new_name in plan:
+            lb.insert(tk.END, f"{old_name}  →  {new_name}")
+        if plan:
+            lb.selection_set(0, tk.END)  # 默认全选
+
+        btn_bar = tk.Frame(rename_frame, bg=self.colors['card'])
+        btn_bar.pack(fill=tk.X, padx=10, pady=8)
+
+        def _select_all():
+            lb.selection_set(0, tk.END)
+
+        def _invert_sel():
+            all_idx = list(range(lb.size()))
+            cur = set(lb.curselection())
+            lb.selection_clear(0, tk.END)
+            for i in all_idx:
+                if i not in cur:
+                    lb.selection_set(i)
+
+        tk.Button(btn_bar, text="全选", command=_select_all, **btn_cfg).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_bar, text="反选", command=_invert_sel, **btn_cfg).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_bar, text="重命名", command=self._do_rename,
+                  bg='#f59e0b', fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.RIGHT, padx=2)
+
+        def _show_rename():
+            restore_frame.pack_forget()
+            rename_frame.pack(fill=tk.BOTH, expand=True)
+
+        def _show_restore():
+            rename_frame.pack_forget()
+            restore_frame.pack(fill=tk.BOTH, expand=True)
+
+        # ── 恢复页 ──
+        restore_frame = tk.Frame(dlg, bg=self.colors['card'])
+
+        restore_info = tk.Label(restore_frame, text=f"已重命名: {len(self.rename_log)} 个文件（勾选后恢复原名）",
+                                bg=self.colors['card'], fg=self.colors['text'],
+                                font=('Segoe UI', 10))
+        restore_info.pack(anchor='w', padx=10, pady=(2, 4))
+
+        rlist_frame = tk.Frame(restore_frame, bg=self.colors['card'])
+        rlist_frame.pack(fill=tk.BOTH, expand=True, padx=10)
+        rlb = tk.Listbox(rlist_frame, selectmode=tk.EXTENDED,
+                         font=('Consolas', 9), bg='#d1d5db', fg='#1f2937',
+                         highlightthickness=0, activestyle='none')
+        rsb = tk.Scrollbar(rlist_frame, orient=tk.VERTICAL, command=rlb.yview)
+        rlb.config(yscrollcommand=rsb.set)
+        rsb.pack(side=tk.RIGHT, fill=tk.Y)
+        rlb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        for entry in self.rename_log:
+            old = os.path.basename(entry.get('old_path', ''))
+            new = os.path.basename(entry.get('new_path', ''))
+            rlb.insert(tk.END, f"{new}  →  {old}")
+        if self.rename_log:
+            rlb.selection_set(0, tk.END)
+
+        rbtn_bar = tk.Frame(restore_frame, bg=self.colors['card'])
+        rbtn_bar.pack(fill=tk.X, padx=10, pady=8)
+
+        def _rselect_all():
+            rlb.selection_set(0, tk.END)
+
+        tk.Button(rbtn_bar, text="全选", command=_rselect_all, **btn_cfg).pack(side=tk.LEFT, padx=2)
+        tk.Button(rbtn_bar, text="恢复原名", command=self._do_restore,
+                  bg='#22c55e', fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.RIGHT, padx=2)
+
+        tab_rename.config(command=_show_rename)
+        tab_restore.config(command=_show_restore)
+
+        _show_rename()
+        self._rename_dialog = dlg
+        self._rename_plan = plan
+        self._rename_listbox = lb
+        self._restore_listbox = rlb
+
+    def _do_rename(self):
+        """执行勾选的重命名"""
+        dlg = getattr(self, '_rename_dialog', None)
+        lb = getattr(self, '_rename_listbox', None)
+        plan = getattr(self, '_rename_plan', [])
+        if lb is None or plan is None:
+            return
+        sel = lb.curselection()
+        if not sel:
+            messagebox.showinfo("提示", "请先勾选要重命名的文件", parent=dlg)
+            return
+
+        done = 0
+        failed = []
+        for idx in sel:
+            if idx >= len(plan):
+                continue
+            old_path, old_name, new_name = plan[idx]
+            folder = os.path.dirname(old_path)
+            target = self._unique_target_path(folder, new_name, old_path)
+            if target == old_path:
+                continue
+            try:
+                os.rename(old_path, target)
+                self.rename_log.append({
+                    'old_path': old_path,
+                    'new_path': target,
+                    'renamed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                })
+                done += 1
+            except Exception as e:
+                failed.append((old_name, str(e)))
+        self._save_rename_log()
+
+        if failed:
+            detail = "\n".join(f"• {n}: {err}" for n, err in failed[:10])
+            messagebox.showwarning("部分失败",
+                                   f"成功 {done} 个，失败 {len(failed)} 个：\n{detail}",
+                                   parent=dlg)
+        if done:
+            messagebox.showinfo("重命名完成", f"已重命名 {done} 个文件", parent=dlg)
+            dlg.destroy()
+            # 自动重新扫描当前任务
+            self.start_scan_with_task()
+
+    def _do_restore(self):
+        """执行勾选的恢复（新名 → 旧名）"""
+        dlg = getattr(self, '_rename_dialog', None)
+        rlb = getattr(self, '_restore_listbox', None)
+        if rlb is None:
+            return
+        sel = rlb.curselection()
+        if not sel:
+            messagebox.showinfo("提示", "请先勾选要恢复的文件", parent=dlg)
+            return
+
+        done = 0
+        failed = []
+        keep_log = []
+        for idx, entry in enumerate(self.rename_log):
+            if idx in sel:
+                old_path = entry.get('old_path', '')
+                new_path = entry.get('new_path', '')
+                if not old_path or not new_path:
+                    continue
+                if os.path.exists(old_path):
+                    failed.append((os.path.basename(new_path), "原文件名已存在，跳过"))
+                    keep_log.append(entry)
+                    continue
+                try:
+                    os.rename(new_path, old_path)
+                    done += 1
+                except Exception as e:
+                    failed.append((os.path.basename(new_path), str(e)))
+                    keep_log.append(entry)
+            else:
+                keep_log.append(entry)
+        self.rename_log = keep_log
+        self._save_rename_log()
+
+        if failed:
+            detail = "\n".join(f"• {n}: {err}" for n, err in failed[:10])
+            messagebox.showwarning("部分失败",
+                                   f"成功恢复 {done} 个，失败 {len(failed)} 个：\n{detail}",
+                                   parent=dlg)
+        if done:
+            messagebox.showinfo("恢复完成", f"已恢复 {done} 个文件的原名", parent=dlg)
+            rlb.delete(0, tk.END)
+            for e in self.rename_log:
+                old = os.path.basename(e.get('old_path', ''))
+                new = os.path.basename(e.get('new_path', ''))
+                rlb.insert(tk.END, f"{new}  →  {old}")
+            rlb.selection_set(0, tk.END)
 
     def _export_ai_rules(self):
         """导出 AI 分析规则文本到文件"""
