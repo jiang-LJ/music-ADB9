@@ -1253,9 +1253,10 @@ class MusicScannerWithTasks(tk.Tk):
         # 自动关闭
         toast.after(duration, toast.destroy)
 
-    def show_scan_result_dialog(self, message: str):
-        """显示扫描结果弹窗（固定宽高比，避免正方形）"""
-        dialog = self._create_dialog("扫描结果", 350, 240)
+    def show_scan_result_dialog(self, message: str, extra_text: str = ''):
+        """显示扫描结果弹窗（固定宽高比，避免正方形）；extra_text 为附加诊断提示"""
+        h = 400 if extra_text else 240
+        dialog = self._create_dialog("扫描结果", 380, h)
         dialog.resizable(False, False)
 
         # 主内容区（横向：左侧数据 + 右侧按钮）
@@ -1273,6 +1274,11 @@ class MusicScannerWithTasks(tk.Tk):
         tk.Label(left, text=message, bg=self.colors['card'], fg=self.colors['text'],
                  font=('Segoe UI', 11), justify=tk.LEFT, anchor='nw').pack(
                      fill=tk.BOTH, expand=True, pady=(8, 0))
+
+        if extra_text:
+            tk.Label(left, text=extra_text, bg=self.colors['card'], fg='#b45309',
+                     font=('Segoe UI', 9), justify=tk.LEFT, anchor='nw',
+                     wraplength=330).pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
         # 右侧：确定按钮（偏下）
         right = tk.Frame(main_frame, bg=self.colors['card'])
@@ -1928,11 +1934,11 @@ class MusicScannerWithTasks(tk.Tk):
         finally:
             self._scan_progress_event.set()
 
-    def _show_scan_diagnosis_if_any(self):
-        """若某文件夹路径存在但扫描到 0 个支持的音频文件，主动弹窗提示用户"""
+    def _build_diagnosis_text(self) -> str:
+        """从扫描诊断信息生成提示文本并清空诊断；无诊断返回空串"""
         diag = getattr(self, '_scan_diagnosis', {})
         if not diag:
-            return
+            return ''
         lines = []
         for ft in ('A', 'B'):
             info = diag.get(ft)
@@ -1948,12 +1954,17 @@ class MusicScannerWithTasks(tk.Tk):
                 lines.append(f"   最常见扩展名: {ext_text}")
             if info['stat_failed']:
                 lines.append(f"   无法读取文件数: {info['stat_failed']}")
-        messagebox.showinfo(
-            "扫描诊断",
+        self._scan_diagnosis.clear()
+        return (
             "以下文件夹路径存在，但没有找到支持的音频文件（.mp3/.flac/.wav/.aac/.ogg/.m4a/.wma）：\n\n"
             + '\n'.join(lines)
         )
-        self._scan_diagnosis.clear()
+
+    def _show_scan_diagnosis_if_any(self):
+        """独立弹窗模式：若有诊断信息则弹窗提示"""
+        text = self._build_diagnosis_text()
+        if text:
+            messagebox.showinfo("扫描诊断", text)
 
     def _poll_scan_progress(self):
         """主线程轮询更新进度弹窗（事件驱动 + 100ms fallback）"""
@@ -1991,9 +2002,8 @@ class MusicScannerWithTasks(tk.Tk):
                     f"聚合去重: {agg}\n"
                     f"扫描耗时: {dur}"
                 )
-                self.show_scan_result_dialog(result_msg)
-
-                self._show_scan_diagnosis_if_any()
+                diag_text = self._build_diagnosis_text()
+                self.show_scan_result_dialog(result_msg, extra_text=diag_text)
             return
 
         self._scan_progress_event.wait(0.1)
