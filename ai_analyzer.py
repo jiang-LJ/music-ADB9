@@ -33,11 +33,26 @@ _TC_TO_SC = str.maketrans({
     '變': '变', '聽': '听', '親': '亲', '舊': '旧', '東': '东', '樂': '乐',
 })
 
-# 末尾版本说明词（归一为同歌；不含"伴奏"——伴奏版单独保留）
+# 归入原版的版本词（去除后与原版同 key，靠「选live版」等规则去重）
 _VERSION_SUFFIXES = (
-    '新版', '独唱版', '合唱版', '完整版', '现场版',
-    'dj版', 'remix版', 'dj', 'remix', 'live', 'acoustic', 'unplugged',
+    '新版', '完整版', '现场版', 'live',
 )
+
+# 独立版本词 → key 后缀（各自保留一个最优，与原版分开）
+_INDEPENDENT_VERSION_TAGS = [
+    ('dj版', '__dj'), ('dj', '__dj'),
+    ('伴奏版', '__acc'), ('伴奏', '__acc'),
+    ('女声版', '__nv'),
+    ('粤语版', '__yy'),
+    ('国语版', '__gy'),
+    ('独唱版', '__dc'),
+    ('合唱版', '__hc'),
+    ('钢琴版', '__gq'), ('钢琴', '__gq'),
+    ('剧场版', '__jc'),
+    ('remix版', '__rx'), ('remix', '__rx'),
+    ('acoustic', '__ac'), ('unplugged', '__ac'),
+    ('instrumental', '__ins'),
+]
 
 
 def _extract_title_key(name: str) -> Optional[str]:
@@ -75,13 +90,24 @@ def _extract_title_key(name: str) -> Optional[str]:
 
 def _normalize_title(title: str, full_name: str = '') -> str:
     """
-    规范化歌曲名：繁→简、去除末尾括号内容、标点统一、去除末尾纯数字、
-    去除末尾版本词（新版/独唱版/DJ版等）。
-    含"伴奏"的追加 __acc 后缀，与原版区分开。
+    规范化歌曲名：繁→简、去除末尾括号内容、标点统一、去除末尾纯数字。
+    版本处理：
+    - 独立版本词（DJ版/伴奏/女声版/粤语版/独唱版/合唱版/钢琴版/Remix/Acoustic/
+      Instrumental/剧场版 等）→ 追加 __xxx 后缀，与原版分开，各自保留一个
+    - 归入原版词（新版/完整版）→ 去除
+    - 归入 live 词（live/现场版）→ 去除（与原版同组，靠「选live版」去重）
     """
     title = title.strip().lower()
     # 繁→简
     title = title.translate(_TC_TO_SC)
+    # 判断独立版本（基于完整文件名的歌名部分，避免歌手名含 DJ 等误判）
+    song_part = full_name.split(' - ', 1)[-1] if ' - ' in full_name else full_name
+    low_song = song_part.lower()
+    ver_tag = None
+    for word, tag in _INDEPENDENT_VERSION_TAGS:
+        if word in low_song:
+            ver_tag = tag
+            break
     # 去除末尾括号内容，如 (Explicit)、(片刻)、（伴奏）等
     title = re.sub(r'\s*[（(][^）)]*[）)]$', '', title).strip()
     # 标点统一：. ・ _ 视为空格分隔（如 "何故.何苦.何必" == "何故 何苦 何必"）
@@ -89,16 +115,24 @@ def _normalize_title(title: str, full_name: str = '') -> str:
     title = re.sub(r'\s+', ' ', title).strip()
     # 去除末尾纯数字（如 "See You Again 1" → "See You Again"）
     title = re.sub(r'\s+\d+$', '', title).strip()
-    # 去除末尾版本词（如 "房间-新版" → "房间"、"喜欢你 live" → "喜欢你"）
+    # 去除归入原版/live 的版本词（live 需防误伤 Alive 等英文单词）
     for suffix in _VERSION_SUFFIXES:
-        if title.endswith(suffix):
+        if suffix == 'live':
+            if re.search(r'(?<=[^a-z])live$', title):
+                title = re.sub(r'(?<=[^a-z])live$', '', title).strip()
+                break
+        elif title.endswith(suffix):
             title = title[:-len(suffix)].strip()
             break
     # 清理版本词去除后可能残留的尾部短横/下划线（如 "房间-" → "房间"）
     title = title.rstrip(' -_').strip()
-    # 含"伴奏"的标记为不同 key
-    if '伴奏' in full_name:
-        title += '__acc'
+    # 独立版本标记（去除标题尾部残留的版本词字样后追加）
+    if ver_tag:
+        for w, _t in _INDEPENDENT_VERSION_TAGS:
+            if title.endswith(w):
+                title = title[:-len(w)].strip()
+                break
+        title += ver_tag
     return title
 
 

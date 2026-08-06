@@ -2818,6 +2818,7 @@ class MusicScannerWithTasks(tk.Tk):
                     self._set_checked_tag(tree, item, False)
 
         checked_paths = set()
+        import ai_analyzer as _ai_mod
         for gi, group in enumerate(groups):
             a_items = [(p, i) for p, i in group if p in self.all_files_a]
             b_items = [(p, i) for p, i in group if p in self.all_files_b]
@@ -2833,17 +2834,23 @@ class MusicScannerWithTasks(tk.Tk):
                     if a_items and b_items and len(a_items) == len(b_items):
                         continue
 
-            # 权重：伴奏版优先 > 时长最大 > 文件最大 > 文件最新
-            # 候选列表，逐步缩小范围
-            candidates = all_items[:]
+            # 按歌名+版本 key 子分组：原版/DJ版/伴奏版 各保留一个最优
+            sub_groups = {}
+            for p, i in all_items:
+                k = _ai_mod.get_file_title_key(p, i, self.file_tags)
+                if k is None:
+                    k = f"__nokey_{p}"
+                sub_groups.setdefault(k, []).append((p, i))
 
-            # 用共享规则选出最优文件
-            keep = self._pick_best_file(candidates)
-
-            # 其余全部勾选
-            for path, _ in all_items:
-                if path != keep:
-                    checked_paths.add(path)
+            for items in sub_groups.values():
+                # 用共享规则选出最优文件
+                keep = self._pick_best_file(items)
+                if not keep:
+                    continue
+                # 子组内其余全部勾选
+                for path, _ in items:
+                    if path != keep:
+                        checked_paths.add(path)
 
         # 在 Treeview 中勾选
         for tree in trees:
@@ -3390,24 +3397,38 @@ class MusicScannerWithTasks(tk.Tk):
                     continue
 
                 same_count += 1
-                cluster_paths = [group[idx][0] for idx in cluster if idx < total_in_group]
-                if len(cluster_paths) < 2:
+                cluster_idx = [idx for idx in cluster if idx < total_in_group]
+                if len(cluster_idx) < 2:
                     continue
 
-                cluster_a = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_a]
-                cluster_b = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_b]
-                all_items = cluster_a + cluster_b
-                if not all_items:
-                    continue
+                # 版本子分组：原版/DJ版/伴奏版 各保留一个最优（key 不同 → 分别处理）
+                import ai_analyzer as _ai_mod
+                sub = {}
+                for idx in cluster_idx:
+                    path, info = group[idx]
+                    k = _ai_mod.get_file_title_key(path, info, self.file_tags)
+                    if k is None:
+                        k = f"__nokey_{path}"
+                    sub.setdefault(k, []).append(idx)
 
-                # 选最优文件
-                keep = self._pick_best_file(all_items)
-                if not keep:
-                    continue
+                for idxs in sub.values():
+                    if len(idxs) < 2:
+                        continue  # 单文件版本：单独保留，不勾选
+                    cluster_paths = [group[i][0] for i in idxs]
+                    cluster_a = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_a]
+                    cluster_b = [(p, info) for p, info in group if p in cluster_paths and p in self.all_files_b]
+                    all_items = cluster_a + cluster_b
+                    if not all_items:
+                        continue
 
-                for path, _ in all_items:
-                    if path != keep and (not self.use_learning.get() or path not in self.user_feedback):
-                        checked_paths.add(path)
+                    # 选最优文件
+                    keep = self._pick_best_file(all_items)
+                    if not keep:
+                        continue
+
+                    for path, _ in all_items:
+                        if path != keep and (not self.use_learning.get() or path not in self.user_feedback):
+                            checked_paths.add(path)
 
         return same_count, diff_count, error_count, checked_paths
 
@@ -3998,18 +4019,33 @@ class MusicScannerWithTasks(tk.Tk):
 
                 if ai_clusters and vt in ('sim', 'approx', 'agg'):
                     # 用 AI 聚类：每个 cluster 内同歌，跨 cluster 不同歌
+                    import ai_analyzer as _ai_mod
                     cluster_keep_map = {}
                     for cluster in ai_clusters:
-                        cluster_paths = [group[idx][0] for idx in cluster if idx < len(group)]
-                        if len(cluster_paths) >= 2:
-                            # 同歌 cluster：选一个保留
+                        cluster_idx = [idx for idx in cluster if idx < len(group)]
+                        if len(cluster_idx) < 2:
+                            # 单文件 cluster：不同歌，全部保留
+                            for idx in cluster_idx:
+                                cluster_keep_map[group[idx][0]] = True
+                            continue
+                        # 版本子分组：原版/DJ版/伴奏版 各保留一个
+                        sub = {}
+                        for idx in cluster_idx:
+                            path, info = group[idx]
+                            k = _ai_mod.get_file_title_key(path, info, self.file_tags)
+                            if k is None:
+                                k = f"__nokey_{path}"
+                            sub.setdefault(k, []).append(idx)
+                        for idxs in sub.values():
+                            if len(idxs) < 2:
+                                for i in idxs:
+                                    cluster_keep_map[group[i][0]] = True
+                                continue
+                            cluster_paths = [group[i][0] for i in idxs]
+                            # 同歌同版本：选一个保留
                             keep = _pick_keep([(p, dict(info)) for p, info in group if p in cluster_paths])
                             for p in cluster_paths:
                                 cluster_keep_map[p] = (p == keep)
-                        else:
-                            # 单文件 cluster：不同歌，全部保留
-                            for p in cluster_paths:
-                                cluster_keep_map[p] = True
 
                     for path, info in group:
                         name = info.get('name', '?')
