@@ -108,8 +108,8 @@ def _normalize_title(title: str, full_name: str = '') -> str:
         if word in low_song:
             ver_tag = tag
             break
-    # 去除末尾括号内容，如 (Explicit)、(片刻)、（伴奏）等
-    title = re.sub(r'\s*[（(][^）)]*[）)]$', '', title).strip()
+    # 去除末尾括号内容（连续多层），如 (Explicit)、(片刻)、（伴奏）、(Live)(1)
+    title = re.sub(r'(?:\s*[（(][^）)]*[）)])+$', '', title).strip()
     # 标点统一：. ・ _ 视为空格分隔（如 "何故.何苦.何必" == "何故 何苦 何必"）
     title = re.sub(r'[.・_／]', ' ', title)
     title = re.sub(r'\s+', ' ', title).strip()
