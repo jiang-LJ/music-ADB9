@@ -1999,7 +1999,13 @@ class MusicScannerWithTasks(tk.Tk):
                     f"扫描耗时: {dur}"
                 )
                 diag_text = self._build_diagnosis_text()
-                self.show_scan_result_dialog(result_msg, extra_text=diag_text)
+                extra_parts = []
+                if diag_text:
+                    extra_parts.append(diag_text)
+                mismatches = self._find_tag_filename_mismatches()
+                if mismatches:
+                    extra_parts.append(self._format_mismatch_text(mismatches))
+                self.show_scan_result_dialog(result_msg, extra_text="\n\n".join(extra_parts))
             return
 
         self._scan_progress_event.wait(0.1)
@@ -3588,6 +3594,39 @@ class MusicScannerWithTasks(tk.Tk):
                 if name and rename_utils.should_rename(name):
                     count += 1
         return count
+
+    def _find_tag_filename_mismatches(self) -> list:
+        """检测文件名与标签 title 不一致的文件，返回 [(name, tag_title), ...]"""
+        import ai_analyzer as _ai
+        mismatches = []
+        for d in (self.all_files_a, self.all_files_b):
+            for path, info in d.items():
+                name = info.get('name', '')
+                if not name:
+                    continue
+                tags = self.file_tags.get(path, {})
+                tag_title = tags.get('title')
+                if not tag_title or not tag_title.strip():
+                    continue  # 无标签不比较
+                file_key = _ai._extract_title_key(name)
+                if file_key is None:
+                    continue
+                tag_key = _ai.normalize_tag_title(tag_title, name)
+                if tag_key is None:
+                    continue  # 标签不可用不比较
+                if file_key != tag_key:
+                    mismatches.append((name, tag_title.strip()))
+        return mismatches
+
+    def _format_mismatch_text(self, mismatches: list) -> str:
+        """生成标签不一致提示文本（数量 + 前 5 个示例）"""
+        total = len(mismatches)
+        lines = [f"⚠ {total} 个文件文件名与标签不一致（可能影响 AI 去重判断）："]
+        for name, tag in mismatches[:5]:
+            lines.append(f"  • {name}  →  标签: {tag}")
+        if total > 5:
+            lines.append(f"  …等 {total} 个，请用 Mp3tag 修正标签")
+        return "\n".join(lines)
 
     def _load_rename_log(self):
         """加载重命名日志（用于恢复功能）"""

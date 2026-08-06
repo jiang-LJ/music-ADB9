@@ -136,6 +136,25 @@ def _normalize_title(title: str, full_name: str = '') -> str:
     return title
 
 
+def normalize_tag_title(tag_title: str, full_name: str = '') -> Optional[str]:
+    """
+    归一化标签 title（用于与文件名歌名对比）。
+    处理：可用性检查（Track编号/纯数字/占位词）、"歌手 - 歌名"格式。
+    返回归一化 key；标签不可用返回 None。
+    """
+    tv = tag_title.strip().lower()
+    if tv in _UNUSABLE_TAGS or len(tv) < 2:
+        return None
+    if re.match(r'^(track|曲目|音轨)\s*\d+$', tv):
+        return None
+    if re.match(r'^[\d\s\-_./\\#]+$', tv):
+        return None
+    # 标签可能含 "歌手 - 歌名" 格式，取歌名部分
+    if ' - ' in tv:
+        tv = tv.split(' - ', 1)[-1].strip()
+    return _normalize_title(tv, full_name)
+
+
 def get_file_title_key(path: str, info: dict, file_tags: Dict[str, dict]) -> Optional[str]:
     """
     获取单个文件的歌曲名 key（用于预聚类与指纹验证复用）。
