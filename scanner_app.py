@@ -321,6 +321,8 @@ class MusicScannerWithTasks(tk.Tk):
         self.feedback_path = get_app_dir() / "user_feedback.json"
         self.user_feedback: set = set()
         self._load_feedback()
+        # 读取学习：默认关闭，勾选后 AI 分析才应用学习记录
+        self.use_learning = tk.BooleanVar(value=False)
         self._load_ai_config()
 
         # 扫描结果数据
@@ -933,6 +935,15 @@ class MusicScannerWithTasks(tk.Tk):
         tk.Label(btn_wrap, text="学习",
                 bg=self.colors['card'], fg=self.colors['accent'],
                 font=('Segoe UI', 9, 'bold')).pack(pady=(10, 4))
+        cb_learn = tk.Checkbutton(btn_wrap, text="读取学习",
+                                  variable=self.use_learning,
+                                  bg=self.colors['card'], fg=self.colors['text'],
+                                  font=('Segoe UI', 9), cursor='hand2',
+                                  selectcolor=self.colors['card'],
+                                  activebackground=self.colors['card'],
+                                  activeforeground=self.colors['text'])
+        cb_learn.pack(pady=(0, 4))
+        Tooltip(cb_learn, "勾选后 AI 分析时应用学习记录（记录中标记为保留的文件不会被勾选）")
         tk.Button(btn_wrap, text="记住调整",
                   command=lambda: messagebox.showinfo(
                       "反馈已记录",
@@ -3260,7 +3271,7 @@ class MusicScannerWithTasks(tk.Tk):
                 if not keep:
                     continue
                 for path, _ in all_items:
-                    if path != keep and path not in self.user_feedback:
+                    if path != keep and (not self.use_learning.get() or path not in self.user_feedback):
                         checked_paths.add(path)
                         dup_checked += 1
 
@@ -3352,7 +3363,7 @@ class MusicScannerWithTasks(tk.Tk):
                     continue
 
                 for path, _ in all_items:
-                    if path != keep and path not in self.user_feedback:
+                    if path != keep and (not self.use_learning.get() or path not in self.user_feedback):
                         checked_paths.add(path)
 
         return same_count, diff_count, error_count, checked_paths
