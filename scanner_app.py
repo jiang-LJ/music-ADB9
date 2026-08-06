@@ -13,7 +13,7 @@ import shutil
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk, filedialog
+from tkinter import messagebox, ttk, filedialog, simpledialog
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -3647,7 +3647,8 @@ class MusicScannerWithTasks(tk.Tk):
             pass
 
     def _build_rename_plan(self) -> list:
-        """构建待重命名计划 [(old_path, old_name, new_name), ...]"""
+        """构建待重命名计划 [(old_path, old_name, new_name, reason), ...]
+        reason 非空 = 无法自动修复，需弹窗人工确认"""
         import rename_utils
         plan = []
         for d in (self.all_files_a, self.all_files_b):
@@ -3655,9 +3656,10 @@ class MusicScannerWithTasks(tk.Tk):
                 name = info.get('name', '')
                 if not name:
                     continue
+                reason = rename_utils.detect_manual_review(name)
                 new_name = rename_utils.build_new_filename(name)
-                if new_name != name:
-                    plan.append((path, name, new_name))
+                if new_name != name or reason:
+                    plan.append((path, name, new_name, reason))
         return plan
 
     def _unique_target_path(self, folder: str, new_name: str, old_path: str) -> str:
@@ -3714,8 +3716,11 @@ class MusicScannerWithTasks(tk.Tk):
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        for old_path, old_name, new_name in plan:
-            lb.insert(tk.END, f"{old_name}  →  {new_name}")
+        for old_path, old_name, new_name, reason in plan:
+            if reason:
+                lb.insert(tk.END, f"⚠ {old_name}  →  (需手动输入)  [{reason}]")
+            else:
+                lb.insert(tk.END, f"{old_name}  →  {new_name}")
         if plan:
             lb.selection_set(0, tk.END)  # 默认全选
 
@@ -3829,12 +3834,63 @@ class MusicScannerWithTasks(tk.Tk):
         done = 0
         failed = []
         done_idx = []
+        # 第一阶段：批量执行能自动修复的项
         for idx in sel:
             if idx >= len(plan):
                 continue
-            old_path, old_name, new_name = plan[idx]
+            old_path, old_name, new_name, reason = plan[idx]
+            if reason:
+                continue  # 需人工的留到第二阶段
             folder = os.path.dirname(old_path)
             target = self._unique_target_path(folder, new_name, old_path)
+            if target == old_path:
+                continue
+            try:
+                os.rename(old_path, target)
+                self.rename_log.append({
+                    'old_path': old_path,
+                    'new_path': target,
+                    'renamed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                })
+                done += 1
+                done_idx.append(idx)
+            except Exception as e:
+                failed.append((old_name, str(e)))
+        # 第二阶段：需人工的文件逐个弹窗确认
+        import rename_utils
+        for idx in sel:
+            if idx >= len(plan):
+                continue
+            old_path, old_name, new_name, reason = plan[idx]
+            if not reason:
+                continue
+            resp = messagebox.askyesnocancel(
+                "需手动修改",
+                f"该文件无法自动修复，需要手动输入新文件名：\n\n{old_name}\n\n"
+                f"原因：{reason}\n\n"
+                "[是] 输入新名修改    [否] 跳过该文件    [取消] 全部否，退出处理",
+                parent=dlg)
+            if resp is None:
+                break  # 取消 = 全部否，退出后续人工处理
+            if not resp:
+                continue  # 否 = 跳过该文件
+            new_input = simpledialog.askstring(
+                "手动修改文件名", "请输入新文件名：",
+                initialvalue=old_name, parent=dlg)
+            if not new_input or not new_input.strip():
+                continue
+            new_input = new_input.strip()
+            # 无扩展名时自动补原扩展名
+            if '.' not in os.path.basename(new_input) and '.' in old_name:
+                new_input += os.path.splitext(old_name)[1]
+            # 非法字符校验
+            if rename_utils._ILLEGAL_CHARS & set(new_input):
+                messagebox.showwarning("无效文件名",
+                                       "文件名含非法字符：\\ / : * ? \" < > |",
+                                       parent=dlg)
+                continue
+            folder = os.path.dirname(old_path)
+            target = self._unique_target_path(folder, new_input, old_path)
             if target == old_path:
                 continue
             try:

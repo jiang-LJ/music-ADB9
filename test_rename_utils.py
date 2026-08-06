@@ -4,7 +4,7 @@
 import os
 import tempfile
 
-from rename_utils import build_new_filename, should_rename, is_copy_suffix
+from rename_utils import build_new_filename, should_rename, is_copy_suffix, detect_manual_review
 
 
 class TestIsCopySuffix:
@@ -226,6 +226,32 @@ class TestAdvancedCleanup:
         assert build_new_filename('ALen & 陈小春 & - 街角的晚风(奥语版).mp3') == \
             'ALen & 陈小春 - 街角的晚风(奥语版).mp3'
         assert build_new_filename('张韶涵\u3164 & \u3164\u3164 - 欧若拉.mp3') == '张韶涵 - 欧若拉.mp3'
+
+
+class TestManualReview:
+    """detect_manual_review：无法自动修复的异常文件名检测"""
+
+    def test_gbk_mojibake_detected(self):
+        assert detect_manual_review('ôá¶É - °®¶ûÀ¼»Ã¼ by ôá¶É.mp3') != ''
+        assert detect_manual_review('Ôç°² - ½­ÄÏ.mp3') != ''
+        assert detect_manual_review('Ð¤°î - »ÃÏë¼´ÐËÇú.mp3') != ''
+
+    def test_download_residue_detected(self):
+        assert detect_manual_review('Various Artists - 2someone_starunkind_lanfranchifarinaradio_itp881000027.m4a') != ''
+        assert detect_manual_review('中国音乐公告牌 - 李嘉格_谢谢你爱我_181109_CD.m4a') != ''
+
+    def test_normal_names_not_detected(self):
+        assert detect_manual_review('Lemâitre - Closer.mp3') == ''
+        assert detect_manual_review('NO BATIDÃO - Teste.mp3') == ''
+        assert detect_manual_review('cici_ - 越来越不懂.m4a') == ''
+        assert detect_manual_review('闻人听书_ - 虞兮叹.m4a') == ''
+        assert detect_manual_review('Joji - 13_Afterthought.m4a') == ''
+        assert detect_manual_review('王菲 - 红豆(1).mp3') == ''
+        assert detect_manual_review('李荣浩 - 李白;李白.mp3') == ''
+        assert detect_manual_review('伍佰 & China Blue - 夏夜晚风.mp3') == ''
+        assert detect_manual_review('Dvorák - 新世界交响曲.mp3') == ''
+        assert detect_manual_review('São Paulo - Sampa.mp3') == ''
+        assert detect_manual_review('Stevie Wonder - Part-Time Lover.mp3') == ''
 
 
 class TestRenameOnDisk:

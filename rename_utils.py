@@ -337,3 +337,36 @@ def is_copy_suffix(name: str) -> bool:
 def should_rename(filename: str) -> bool:
     """判定文件名是否需要重命名"""
     return build_new_filename(filename) != filename
+
+
+# 连续 ≥4 个 latin-1 扩展字符（ôá¶É、°®¶ûÀ¼»Ã¼ 等 GBK 乱码特征；Lemâitre 仅 1 个、NO BATIDÃO 连续 2 个不误报）
+_LATIN_EXT_RUN = re.compile(r'[\u0080-\u00ff]{4,}')
+
+
+def detect_manual_review(filename: str) -> str:
+    """
+    检测无法自动可靠修复的异常文件名，返回异常原因；正常返回空字符串。
+    命中的文件应在重命名时弹窗让用户手动输入新名。
+    """
+    name = filename.rsplit('/', 1)[-1].rsplit('\\', 1)[-1]
+    stem = name.rsplit('.', 1)[0] if '.' in name else name
+
+    # 1. 乱码字符检测：替换字符 / 控制字符 / 连续拉丁扩展乱码串
+    if '\ufffd' in stem:
+        return '文件名含乱码字符（�）'
+    if re.search(r'[\x00-\x1f\x7f-\x9f]', stem):
+        return '文件名含控制字符'
+    if _LATIN_EXT_RUN.search(stem):
+        return '文件名疑似 GBK 乱码（含连续拉丁扩展字符）'
+
+    # 2. 下载残留命名检测：歌名部分是三段以上下划线小写串（2someone_starunkind_xxx）/ 含日期/ID 串
+    if ' - ' in stem:
+        _title = stem.split(' - ', 1)[1].strip()
+    else:
+        _title = stem
+    if re.fullmatch(r'[a-z0-9]+(?:_[a-z0-9]+){2,}', _title, re.IGNORECASE):
+        return '下载残留命名（下划线串）'
+    if re.search(r'_\d{5,}_', _title) or re.fullmatch(r'[^_]+_\d{4}_[a-z0-9]{0,4}', _title, re.IGNORECASE):
+        return '下载残留命名（含日期/ID 串）'
+
+    return ''
