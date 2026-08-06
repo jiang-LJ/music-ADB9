@@ -1258,12 +1258,15 @@ class MusicScannerWithTasks(tk.Tk):
         toast.after(duration, toast.destroy)
 
     def show_scan_result_dialog(self, message: str, extra_text: str = ''):
-        """显示扫描结果弹窗（统一白色字体；extra_text 为附加诊断提示）"""
-        h = 480 if extra_text else 330
-        dialog = self._create_dialog("扫描结果", 460, h)
+        """显示扫描结果弹窗（统一白色字体；extra_text 为附加诊断提示；内容可滚动、高度自适应）"""
+        content = message if not extra_text else f"{message}\n\n{extra_text}"
+        # 高度自适应：按内容行数估算（wraplength 约 40 字符/行），上限 620
+        est_lines = sum(max(1, (len(line) + 39) // 40) for line in content.splitlines())
+        h = min(620, max(260, 140 + est_lines * 19))
+        dialog = self._create_dialog("扫描结果", 480, h)
         dialog.resizable(False, False)
 
-        # 主内容区（纵向：顶部按钮 + 下方文本，按钮始终可见）
+        # 主内容区（纵向：顶部按钮 + 下方可滚动文本，按钮始终可见）
         main_frame = tk.Frame(dialog, bg=self.colors['card'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
 
@@ -1279,21 +1282,20 @@ class MusicScannerWithTasks(tk.Tk):
                   font=('Segoe UI', 11), cursor='hand2', width=12).pack(
                       side=tk.LEFT, padx=6)
 
-        # 下方：图标 + 数据 + 诊断
-        top = tk.Frame(main_frame, bg=self.colors['card'])
-        top.pack(fill=tk.BOTH, expand=True)
-
-        tk.Label(top, text="ℹ", bg=self.colors['card'], fg='white',
-                 font=('Segoe UI', 20)).pack(anchor='w')
-
-        tk.Label(top, text=message, bg=self.colors['card'], fg='white',
-                 font=('Segoe UI', 11), justify=tk.LEFT, anchor='nw').pack(
-                     fill=tk.BOTH, expand=True, pady=(10, 0))
-
-        if extra_text:
-            tk.Label(top, text=extra_text, bg=self.colors['card'], fg='white',
-                     font=('Segoe UI', 11), justify=tk.LEFT, anchor='nw',
-                     wraplength=420).pack(fill=tk.BOTH, expand=True, pady=(12, 0))
+        # 下方：可滚动文本区（只读）
+        text_frame = tk.Frame(main_frame, bg=self.colors['card'])
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        txt = tk.Text(text_frame, wrap='word', bg=self.colors['card'], fg='white',
+                      font=('Segoe UI', 11), relief='flat', highlightthickness=0,
+                      borderwidth=0, padx=4, pady=4, spacing1=3, spacing3=3,
+                      state='disabled', cursor='arrow')
+        sb = tk.Scrollbar(text_frame, orient=tk.VERTICAL, command=txt.yview)
+        txt.config(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        txt.config(state='normal')
+        txt.insert('1.0', content)
+        txt.config(state='disabled')
 
     def _export_mismatch_list(self, parent=None):
         """导出文件名与标签不一致清单为 TXT（《不一致清单.txt》，每行一个完整路径，保存位置由用户选择）"""
