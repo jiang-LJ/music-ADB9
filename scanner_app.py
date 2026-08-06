@@ -236,7 +236,7 @@ HELP_CONTENT = """
   • 在聚合去重视图下，智选去重、一键选A/B 对三类组全部生效
   • AI 分析：只分析相似/近似组（重复组内容相同无需 AI），分析后重复组自动按规则勾选冗余文件
 
-【快速选择】
+【手动分析】
   • 一键选A / 一键选B：在当前视图（重复/相似/近似）中一键选中所有对应文件夹的文件
   • 智选去重：根据下方勾选的筛选条件，在每组中智能保留最优文件（权重：最大时长 > 最大文件 > 最新文件），其余勾选
   • 最大时长 / 最大文件 / 最新文件：智选去重的筛选条件，可单选或多选
@@ -360,8 +360,8 @@ class MusicScannerWithTasks(tk.Tk):
         top_frame.columnconfigure(1, weight=1)   # 中：当前任务+文件夹A+文件夹B
         top_frame.columnconfigure(2, weight=0, minsize=225)   # 操作（加宽50%）
         top_frame.columnconfigure(3, weight=0, minsize=300)   # 扫描结果概览
-        top_frame.columnconfigure(4, weight=0, minsize=300)   # 快速选择（加宽）
-        top_frame.columnconfigure(5, weight=0, minsize=170)   # AI 应用（与操作栏同宽）
+        top_frame.columnconfigure(4, weight=0, minsize=300)   # 手动分析（加宽）
+        top_frame.columnconfigure(5, weight=0, minsize=170)   # AI 分析（与操作栏同宽）
 
         # 左栏：任务管理
         task_frame = tk.LabelFrame(top_frame, text="📋 任务管理",
@@ -409,7 +409,7 @@ class MusicScannerWithTasks(tk.Tk):
         self._fill_overview_panel(overview_frame)
 
         # 右栏第3列：快速操作
-        quick_frame = tk.LabelFrame(top_frame, text="⚡ 快速选择",
+        quick_frame = tk.LabelFrame(top_frame, text="⚡ 手动分析",
                                     bg=self.colors['card'],
                                     fg=self.colors['text'],
                                     font=('Segoe UI', 11, 'bold'))
@@ -417,7 +417,7 @@ class MusicScannerWithTasks(tk.Tk):
         self._fill_quick_action_panel(quick_frame)
 
         # 最右栏：软件使用说明
-        help_frame = tk.LabelFrame(top_frame, text="🤖 AI 应用",
+        help_frame = tk.LabelFrame(top_frame, text="🤖 AI 分析",
                                    bg=self.colors['card'],
                                    fg=self.colors['text'],
                                    font=('Segoe UI', 11, 'bold'))
@@ -812,7 +812,7 @@ class MusicScannerWithTasks(tk.Tk):
         Tooltip(worker_spin, "控制读取音频时长和计算MD5时的并行线程数（1~32，默认32）。SSD建议16~32，机械硬盘建议2~4。")
 
     def _fill_quick_action_panel(self, quick_frame):
-        """填充快速选择面板（V17：智选去重+三条件勾选）"""
+        """填充手动分析面板（V17：智选去重+三条件勾选）"""
         container = tk.Frame(quick_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=3)
 
@@ -908,7 +908,7 @@ class MusicScannerWithTasks(tk.Tk):
         Tooltip(cancel_btn, "取消所有已选中的文件")
 
     def _fill_help_panel(self, help_frame):
-        """填充 AI 应用面板"""
+        """填充 AI 分析面板"""
         container = tk.Frame(help_frame, bg=self.colors['card'])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -922,14 +922,12 @@ class MusicScannerWithTasks(tk.Tk):
         btn_wrap = tk.Frame(container, bg=self.colors['card'])
         btn_wrap.pack(expand=True)
 
-        tk.Label(btn_wrap, text="AI 分析",
+        tk.Label(btn_wrap, text="AI 操作",
                 bg=self.colors['card'], fg=self.colors['accent'],
                 font=('Segoe UI', 9, 'bold')).pack(pady=(8, 4))
         tk.Button(btn_wrap, text="API 配置", command=self._configure_api,
                   **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
         tk.Button(btn_wrap, text="AI 分析", command=self._run_ai_analysis,
-                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
-        tk.Button(btn_wrap, text="导出列表", command=self._export_list_to_txt,
                   **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
 
         tk.Label(btn_wrap, text="学习",
@@ -2682,7 +2680,7 @@ class MusicScannerWithTasks(tk.Tk):
         self.update_selection_stats()
 
     def quick_select(self, result_type: str, folder: str, status: str = None):
-        """快速选择功能"""
+        """手动分析功能"""
         if result_type == 'dup':
             self.switch_result_view('dup')
             target = self.result_tree_a if folder == 'A' else self.result_tree_b
