@@ -182,6 +182,36 @@ def _clean_illegal_chars(stem: str) -> str:
     return s
 
 
+def _wrap_bare_version_suffix(title: str) -> str:
+    """
+    歌名末尾无括号的版本词（live/dj/remix/slowed 等）包进括号并统一。
+    误判防护：
+    - 版本词前是英文字母（Alive/Premix）→ 不包
+    - 版本词前是空格，且空格前整段为纯英文、无分隔符（如 "Because You Live" 是歌名）→ 不包
+    """
+    low = title.lower()
+    for k in sorted(_VERSION_MAP, key=len, reverse=True):
+        m = re.search(r'(?<=[^a-z])' + re.escape(k) + r'$', low)
+        if not m:
+            continue
+        start = m.start()
+        if start == 0:
+            continue
+        prev = title[start - 1]
+        # 版本词前紧邻英文字母（alive/premix 等单词的一部分）
+        if prev.isascii() and prev.isalpha():
+            continue
+        # 版本词前是空格：空格前整段纯英文且无分隔符 → 歌名的一部分，不包
+        if prev.isspace():
+            before = title[:start].rstrip()
+            if before and '-' not in before and all(c.isascii() for c in before):
+                continue
+        prefix = title[:start].rstrip(' -_').strip()
+        if prefix:
+            return f"{prefix}({_VERSION_MAP[k]})"
+    return title
+
+
 # ─────────────────────────── 主入口 ───────────────────────────
 
 def build_new_filename(filename: str) -> str:
@@ -213,6 +243,12 @@ def build_new_filename(filename: str) -> str:
 
     # 4. 括号统一 + 未闭合补全
     stem = _unify_parens(stem)
+    # 4.5 无括号版本词包覆（歌名尾部 live/dj/remix 等 → (Live)/(DJ版)/(Remix)）
+    a, t = split_artist_title(stem)
+    if a is not None:
+        t2 = _wrap_bare_version_suffix(t)
+        if t2 != t:
+            stem = f"{a} - {t2}"
     # 5. 版本词统一
     stem = _unify_version_parens(stem)
     # 6. 空格最终规范

@@ -78,9 +78,23 @@ class TestBuildNewFilename:
         assert build_new_filename('伍佰 & China Blue - 夏夜晚风.mp3') == \
             '伍佰 & China Blue - 夏夜晚风.mp3'
 
-    def test_no_bracket_dj_kept(self):
-        """无括号版本后缀不处理"""
-        assert build_new_filename('AEC - 不染dj.m4a') == 'AEC - 不染dj.m4a'
+    def test_no_bracket_dj_wrapped(self):
+        """无括号版本词 dj → 包进括号统一为 (DJ版)"""
+        assert build_new_filename('AEC - 不染dj.m4a') == 'AEC - 不染(DJ版).m4a'
+
+    def test_live_word_in_title_kept(self):
+        """英文歌名含 Live（Because You Live / Alive）不应被误包"""
+        assert build_new_filename('Jesse McCartney - Because You Live.mp3') == \
+            'Jesse McCartney - Because You Live.mp3'
+        assert build_new_filename('Blue - Alive.mp3') == 'Blue - Alive.mp3'
+
+    def test_bare_version_wrapped(self):
+        """中文歌名尾部的无括号版本词应包覆"""
+        assert build_new_filename('泰山有货机 - 沙威玛传奇 Remix.mp3') == \
+            '泰山有货机 - 沙威玛传奇(Remix).mp3'
+        assert build_new_filename('王绎龙 - 午夜DJ.mp3') == '王绎龙 - 午夜(DJ版).mp3'
+        assert build_new_filename('许巍 - 许巍《我们》2022LIVE.m4a') == \
+            '许巍 - 许巍《我们》2022(Live).m4a'
 
     def test_should_rename(self):
         assert should_rename('李克勤, 容祖儿 - 世界真细小.mp3') is True
