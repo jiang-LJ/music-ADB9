@@ -323,6 +323,8 @@ class MusicScannerWithTasks(tk.Tk):
         self._load_feedback()
         # 读取学习：默认关闭，勾选后 AI 分析才应用学习记录
         self.use_learning = tk.BooleanVar(value=False)
+        # 选live版：默认勾选，优先勾选 Live 版（保留原版）
+        self.use_live_priority = tk.BooleanVar(value=True)
         self._load_ai_config()
 
         # 扫描结果数据
@@ -924,13 +926,20 @@ class MusicScannerWithTasks(tk.Tk):
         btn_wrap = tk.Frame(container, bg=self.colors['card'])
         btn_wrap.pack(expand=True)
 
-        tk.Label(btn_wrap, text="AI 操作",
-                bg=self.colors['card'], fg=self.colors['accent'],
-                font=('Segoe UI', 9, 'bold')).pack(pady=(8, 4))
         tk.Button(btn_wrap, text="API 配置", command=self._configure_api,
-                  **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
+                  **btn_ai).pack(pady=(8, 2), ipadx=20, fill=tk.X)
         tk.Button(btn_wrap, text="AI 分析", command=self._run_ai_analysis,
                   **btn_ai).pack(pady=2, ipadx=20, fill=tk.X)
+        cb_live = tk.Checkbutton(btn_wrap, text="选live版",
+                                 variable=self.use_live_priority,
+                                 bg=self.colors['card'], fg=self.colors['text'],
+                                 font=('Segoe UI', 9), cursor='hand2',
+                                 selectcolor=self.colors['card'],
+                                 activebackground=self.colors['card'],
+                                 activeforeground=self.colors['text'])
+        cb_live.pack(pady=(0, 6))
+        Tooltip(cb_live, "勾选后 AI 分析/智选去重时优先勾选 Live 版（保留原版）\n"
+                         "仅当 Live 版与原版时长差≤5秒时生效")
 
         tk.Label(btn_wrap, text="学习",
                 bg=self.colors['card'], fg=self.colors['accent'],
@@ -3386,10 +3395,10 @@ class MusicScannerWithTasks(tk.Tk):
         if acc:
             cands = acc
 
-        # Live 版优先删除
+        # Live 版优先删除（「选live版」勾选时生效）
         live = [(p, i) for p, i in cands if 'live' in i.get('name', '').lower()]
         non_live = [(p, i) for p, i in cands if 'live' not in i.get('name', '').lower()]
-        if live and non_live:
+        if self.use_live_priority.get() and live and non_live:
             for _, li in live:
                 for _, ni in non_live:
                     ld = li.get('duration')
