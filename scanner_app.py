@@ -1296,21 +1296,18 @@ class MusicScannerWithTasks(tk.Tk):
                       side=tk.LEFT, padx=6)
 
     def _export_mismatch_list(self, parent=None):
-        """导出文件名与标签不一致清单为 CSV（不一致列表-月-日-两位随机字母.csv）"""
+        """导出文件名与标签不一致清单为 CSV（《不一致清单.csv》，保存位置由用户选择）"""
         mismatches = self._find_tag_filename_mismatches()
         if not mismatches:
             messagebox.showinfo("导出列表", "没有文件名与标签不一致的文件",
                                 parent=parent)
             return
-        now = datetime.now()
-        letters = (f"{random.choice('abcdefghijklmnopqrstuvwxyz')}"
-                   f"{random.choice('abcdefghijklmnopqrstuvwxyz')}")
-        default_name = f"不一致列表-{now.month:02d}-{now.day:02d}-{letters}.csv"
+        default_name = "不一致清单.csv"
         file_path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             initialfile=default_name,
             filetypes=[("CSV 文件", "*.csv")],
-            title="导出不一致列表",
+            title="导出不一致清单",
             parent=parent,
         )
         if not file_path:
@@ -1322,6 +1319,7 @@ class MusicScannerWithTasks(tk.Tk):
                 s = '"' + s.replace('"', '""') + '"'
             return s
 
+        now = datetime.now()
         lines = [
             "# 文件名与标签不一致清单",
             f"# 导出时间: {now.strftime('%Y-%m-%d %H:%M:%S')}",
