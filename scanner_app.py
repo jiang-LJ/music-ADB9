@@ -4179,6 +4179,10 @@ class MusicScannerWithTasks(tk.Tk):
             messagebox.showinfo("移动完成",
                                 f"已移动 {done} 个文件到:\n{target_dir}",
                                 parent=dlg)
+        else:
+            messagebox.showinfo("未移动",
+                                "没有文件被移动（可能因目标已存在同名文件）",
+                                parent=dlg)
 
     def _delete_selected_files(self):
         """把勾选的重命名文件移入回收站（二次确认），从列表和扫描结果移除并计数"""
@@ -4235,6 +4239,10 @@ class MusicScannerWithTasks(tk.Tk):
         elif done:
             messagebox.showinfo("删除完成",
                                 f"已移入回收站 {done} 个文件",
+                                parent=dlg)
+        else:
+            messagebox.showinfo("未删除",
+                                "没有文件被删除（移入回收站失败或文件不存在）",
                                 parent=dlg)
 
     def _remove_from_rename_list(self, done_idx, plan, lb):
@@ -4350,9 +4358,13 @@ class MusicScannerWithTasks(tk.Tk):
             messagebox.showwarning("部分失败",
                                    f"成功 {done} 个，失败 {len(failed)} 个：\n{detail}",
                                    parent=dlg)
-        if done:
+        elif done:
             messagebox.showinfo("重命名完成",
                                 f"已重命名 {done} 个文件（可继续操作，关闭弹窗后重新扫描刷新）",
+                                parent=dlg)
+        else:
+            messagebox.showinfo("未重命名",
+                                "没有文件被重命名（可能因目标已存在同名文件或名称未变化）",
                                 parent=dlg)
 
     def _do_restore(self):
