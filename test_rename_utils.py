@@ -116,6 +116,67 @@ class TestBuildNewFilename:
         assert should_rename('伍佰 & China Blue - 夏夜晚风.mp3') is False
 
 
+class TestAdvancedCleanup:
+    """重命名后残留问题的进阶清理规则"""
+
+    def test_artist_trailing_ampersand(self):
+        assert build_new_filename('ALen & 陈小春 & - 街角的晚风(奥语版).mp3') == \
+            'ALen & 陈小春 - 街角的晚风(奥语版).mp3'
+
+    def test_artist_amp_dash_between(self):
+        """MissGoog & - 薛之谦 → MissGoog & 薛之谦（& 连接，- 多余）"""
+        assert build_new_filename('MissGoog & - 薛之谦 - 雪落下的声音.mp3') == \
+            'MissGoog & 薛之谦 - 雪落下的声音.mp3'
+
+    def test_artist_trailing_dash(self):
+        assert build_new_filename('静怡DJ-RINO- - Sleeptalking(韩国版).m4a') == \
+            '静怡DJ-RINO - Sleeptalking(韩国版).m4a'
+
+    def test_underscore_artist_kept(self):
+        """cici_ 等以下划线结尾的合法歌手名不应被删下划线"""
+        assert build_new_filename('cici_ - 越来越不懂.m4a') == 'cici_ - 越来越不懂.m4a'
+        assert build_new_filename('相依为命_ - _R.mp3') == '相依为命_ - _R.mp3'
+
+    def test_semicolon_artists(self):
+        assert build_new_filename('A1 TRIP;Nick.Y;云推荐 - butterfly.mp3') == \
+            'A1 TRIP & Nick.Y & 云推荐 - butterfly.mp3'
+
+    def test_artist_duplicate_merged(self):
+        assert build_new_filename('Carly Rae Jepsen - Carly Rae Jepsen - Call Me Maybe.mp3') == \
+            'Carly Rae Jepsen - Call Me Maybe.mp3'
+        assert build_new_filename('Beyond(黄家驹) - Beyond(黄家驹) - 灰色轨迹.mp3') == \
+            'Beyond(黄家驹) - 灰色轨迹.mp3'
+
+    def test_artist_duplicate_kept_when_same_as_title(self):
+        """black black heart - black black heart（歌名本身=歌手名）不应合并"""
+        assert build_new_filename('black black heart - black black heart.mp3') == \
+            'black black heart - black black heart.mp3'
+
+    def test_title_contains_artist(self):
+        assert build_new_filename('尚士达 - 尚士达-生而为人.m4a') == '尚士达 - 生而为人.m4a'
+
+    def test_version_trailing_singer_removed(self):
+        assert build_new_filename('QQ音乐 - 我在人民广场吃炸鸡(Live)-彭滢.mp3') == \
+            'QQ音乐 - 我在人民广场吃炸鸡(Live).mp3'
+        assert build_new_filename('电音任瑶 - 02-格啦啦(DJ版)-电音任瑶+徐友根+爱仔仔.m4a') == \
+            '电音任瑶 - 格啦啦(DJ版).m4a'
+
+    def test_sequencenum_cleaned(self):
+        assert build_new_filename('边江 - 18.月色真美(Live)-边江.mp3') == \
+            '边江 - 月色真美(Live).mp3'
+        assert build_new_filename('EA7 - 05.EA7 - 潮汐旋律(DJ原声).m4a') == \
+            'EA7 - 潮汐旋律(DJ原声).m4a'
+
+    def test_subtitle_hyphen_kept(self):
+        """(300c) - Tempo di Menuetto 这类副标题不应被当作版本后歌手删除"""
+        assert build_new_filename('Hilary Hahn - Sonata in E minor K. 304 (300c) - Tempo di Menuetto.mp3') == \
+            'Hilary Hahn - Sonata in E minor K. 304 (300c) - Tempo di Menuetto.mp3'
+
+    def test_empty_parens_removed(self):
+        assert build_new_filename('Musicsum - Musicsum - Hello () .mp3') == \
+            'Musicsum - Hello.mp3'
+
+
 class TestRenameOnDisk:
     """真实文件重命名/恢复测试（临时目录）"""
 

@@ -117,7 +117,7 @@ def _normalize_separator_spaces(text: str) -> str:
 
 
 def _unify_multi_artists(artist: str) -> str:
-    """多歌手分隔符统一为 ' & '（两侧带空格）"""
+    """多歌手分隔符统一为 ' & '（两侧带空格），并清理歌手名尾部残留"""
     if not artist:
         return artist
     # 多空格（≥2）连接的歌手 → " & "（先处理，避免被压缩）
@@ -125,6 +125,7 @@ def _unify_multi_artists(artist: str) -> str:
     # 各种分隔符 → " & "
     artist = re.sub(r'[、，]', ' & ', artist)
     artist = re.sub(r',', ' & ', artist)
+    artist = re.sub(r'\s*;\s*', ' & ', artist)          # 分号 "A;B" → "A & B"
     # 下划线：两侧有内容才转（避免 "cici_" 这类歌手名被破坏）
     artist = re.sub(r'\s+_\s+', ' & ', artist)          # "A _ B"
     artist = re.sub(r'(?<=\S)_(?=\S)', ' & ', artist)   # "A_B"
@@ -133,8 +134,14 @@ def _unify_multi_artists(artist: str) -> str:
     artist = re.sub(r'(?<=\S)\+(?=\S)', ' & ', artist)  # "A+B"
     # 无空格 & → " & "
     artist = re.sub(r'(?<=\S)&(?=\S)', ' & ', artist)
+    # 歌手间 "- &" 模式（如 "薛之谦- & MissGoog" → "薛之谦 & MissGoog"）
+    artist = re.sub(r'\s*-\s*&\s*', ' & ', artist)
     # 压缩多余空格
     artist = _normalize_separator_spaces(artist)
+    # 清理歌手名尾部残留分隔符（多余 " & "、"-"；不删下划线——cici_ 等是合法歌手名）
+    artist = re.sub(r'(?:\s*&\s*)+$', '', artist)
+    artist = re.sub(r'-\s*$', '', artist)
+    artist = artist.strip()
     return artist
 
 
@@ -226,13 +233,35 @@ def build_new_filename(filename: str) -> str:
     else:
         stem, ext = filename[:dot], filename[dot:]
 
+    # 修复 "& -" 相邻：前面已有 & → "&" 是多余末尾符、"-" 是主分隔符；
+    # 前面无 & → "&" 是歌手连接符、"-" 多余（如 MissGoog & - 薛之谦 → MissGoog & 薛之谦）
+    def _fix_amp_dash(m):
+        prefix = m.string[:m.start()]
+        return ' - ' if '&' in prefix else ' & '
+    stem = re.sub(r'\s*&\s*-\s*', _fix_amp_dash, stem)
+
     # 1. 拆分 歌手 - 歌名（正则容忍多空格分隔符）
     artist, title = split_artist_title(stem)
 
     if artist is not None:
-        # 2. 多歌手分隔符统一（多空格 → &）
+        # 2. 多歌手分隔符统一（多空格 → &）+ 歌手名尾部清理
         artist = _unify_multi_artists(artist)
         title = _normalize_separator_spaces(title)
+        # 2.1 序号前缀（18. / 02- 等开头数字序号）
+        title = re.sub(r'^\s*\d{1,3}\s*[.、\-]\s*', '', title)
+        # 2.2 歌手名重复：歌名以「歌手 - 」开头（Carly Rae Jepsen - Carly Rae Jepsen - Call Me Maybe）
+        prefix = f"{artist} - "
+        if title.lower().startswith(prefix.lower()):
+            title = title[len(prefix):].strip()
+        # 2.3 歌名含歌手名：歌名以「歌手名-」开头（尚士达-生而为人 → 生而为人）
+        last_artist = artist.split(' & ')[-1].strip()
+        if last_artist and title.lower().startswith(last_artist.lower() + '-'):
+            title = title[len(last_artist):].lstrip('- ').strip()
+        # 2.4 版本括号后跟 -歌手（仅限版本词括号，如 (Live)-彭滢 → (Live)；
+        #     不动 (300c) - Tempo di Menuetto 这类副标题）
+        title = re.sub(
+            r'(\((?:live|dj|remix|伴奏|现场|女声|粤语|国语|独唱|合唱|钢琴|剧场)[^()]*\))\s*-\s*[^()]+$',
+            r'\1', title, flags=re.IGNORECASE)
         # 3. 繁体转简体（歌手 + 歌名）
         artist = to_simplified(artist)
         title = to_simplified(title)
@@ -243,6 +272,8 @@ def build_new_filename(filename: str) -> str:
 
     # 4. 括号统一 + 未闭合补全
     stem = _unify_parens(stem)
+    # 清理空括号（如 "...OST) ()" → "...OST)"）
+    stem = re.sub(r'\s*\(\)', '', stem)
     # 4.5 无括号版本词包覆（歌名尾部 live/dj/remix 等 → (Live)/(DJ版)/(Remix)）
     a, t = split_artist_title(stem)
     if a is not None:
