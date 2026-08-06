@@ -169,9 +169,9 @@ HELP_CONTENT = """
     ※ 仅当两个文件都能读取到有效时长时才进行时长过滤，任一无法读取则跳过
   • 不会与重复/相似文件重叠，三者互斥
 
-【唯一文件】不属于重复、相似、近似任何一类的文件
-  • 计算方式：总文件数 − 重复文件 − 相似文件 − 近似文件
-  • 四者严格互斥，相加等于总文件数
+【聚合去重】重复、相似、近似三类文件的总览（可统一去重处理）
+  • 重复文件 + 相似文件 + 近似文件 = 聚合去重覆盖的文件总数
+  • 三类互斥，不会重叠
 
 功能与用法
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -221,20 +221,20 @@ HELP_CONTENT = """
   • 撤销移动：将最近一次移入回收站的文件恢复至原来的路径
 
 【结果视图切换】
-  • 点击扫描结果概览区的彩色数字可切换视图：重复文件 / 相似文件 / 近似文件 / 唯一文件 / 全部
+  • 点击扫描结果概览区的彩色数字可切换视图：重复文件 / 相似文件 / 近似文件 / 聚合去重 / 全部
   • 概览区各数字含义：
     - 总文件数：文件夹 A 和文件夹 B 中的文件总数（点击切换为全部视图）
     - 重复文件：内容完全相同的文件总数
     - 相似文件：文件名相同但内容可能不同的文件总数
     - 近似文件：文件名相似且时长接近的文件总数
-    - 唯一文件：不属于重复/相似/近似的独立文件数
+    - 聚合去重：重复/相似/近似三类覆盖的文件总数（点击切换聚合去重视图）
     - 扫描耗时：本次扫描所花费的时间
   • 文件夹统计区（🟢 新增 / 🟡 修改）：增量扫描下，与上次扫描基准相比的新增和修改文件数量；全新扫描时此处为 0
 
-【唯一文件】
-  • 指既不属于重复文件、也不属于相似文件、更不属于近似文件的文件
-  • 计算方式：总文件数 − 重复文件 − 相似文件 − 近似文件
-    ※ 四者严格互斥，相加等于总文件数
+【聚合去重】
+  • 将重复、相似、近似三类文件统一展示，每组前有类型分隔行
+  • 在聚合去重视图下，智选去重、一键选A/B 对三类组全部生效
+  • AI 分析：只分析相似/近似组（重复组内容相同无需 AI），分析后重复组自动按规则勾选冗余文件
 
 【快速选择】
   • 一键选A / 一键选B：在当前视图（重复/相似/近似）中一键选中所有对应文件夹的文件
@@ -666,7 +666,7 @@ class MusicScannerWithTasks(tk.Tk):
             ('duplicate_groups', '重复文件', '#ef4444', 'dup'),
             ('similar_groups', '相似文件', '#f59e0b', 'sim'),
             ('approximate_groups', '近似文件', '#a855f7', 'approx'),
-            ('unique_files', '唯一文件', '#22c55e', None),
+            ('agg_files', '聚合去重', '#22c55e', 'agg'),
             ('duration', '扫描耗时', '#94a3b8', None),
         ]
 
@@ -679,7 +679,7 @@ class MusicScannerWithTasks(tk.Tk):
             'duplicate_groups': '内容完全相同的文件总数（点击仅显示重复文件）',
             'similar_groups': '文件名相同但内容可能不同的文件总数（点击仅显示相似文件）',
             'approximate_groups': '文件名相似且时长接近的文件总数（点击仅显示近似文件）',
-            'unique_files': '不属于重复/相似/近似的独立文件数（计算公式：总文件数 − 重复 − 相似 − 近似）',
+            'agg_files': '三类（重复/相似/近似）覆盖的文件总数，可统一去重处理（点击切换聚合去重视图）',
             'duration': '本次扫描所花费的时间',
         }
 
@@ -1943,14 +1943,14 @@ class MusicScannerWithTasks(tk.Tk):
                 dup = self.overview_vars['duplicate_groups'].get()
                 sim = self.overview_vars['similar_groups'].get()
                 approx = self.overview_vars['approximate_groups'].get()
-                unique = self.overview_vars['unique_files'].get()
+                agg = self.overview_vars['agg_files'].get()
                 dur = self.overview_vars['duration'].get()
                 result_msg = (
                     f"总文件数: {total}\n"
                     f"重复文件: {dup}\n"
                     f"相似文件: {sim}\n"
                     f"近似文件: {approx}\n"
-                    f"唯一文件: {unique}\n"
+                    f"聚合去重: {agg}\n"
                     f"扫描耗时: {dur}"
                 )
                 self.show_scan_result_dialog(result_msg)
@@ -2343,13 +2343,13 @@ class MusicScannerWithTasks(tk.Tk):
         dup_files = sum(len(g) for g in self.duplicate_groups)
         sim_files = sum(len(g) for g in self.similar_groups)
         approx_files = sum(len(g) for g in self.approximate_groups)
-        unique = total - dup_files - sim_files - approx_files
+        agg = dup_files + sim_files + approx_files
 
         self.overview_vars['total_files'].set(str(total))
         self.overview_vars['duplicate_groups'].set(str(dup_files))
         self.overview_vars['similar_groups'].set(str(sim_files))
         self.overview_vars['approximate_groups'].set(str(approx_files))
-        self.overview_vars['unique_files'].set(str(unique))
+        self.overview_vars['agg_files'].set(str(agg))
         self.overview_vars['duration'].set(f"{duration:.1f}s")
 
         # 文件夹统计
@@ -2383,6 +2383,8 @@ class MusicScannerWithTasks(tk.Tk):
         for tree in (left, right):
             tree.tag_configure('group_even', background='#dbeafe')    # 淡蓝
             tree.tag_configure('group_odd', background='#fef9c3')     # 淡黄
+            tree.tag_configure('group_header', background='#e2e8f0',
+                               foreground='#475569', font=('Segoe UI', 9, 'bold'))
 
         for item in left.get_children(): left.delete(item)
         for item in right.get_children(): right.delete(item)
@@ -2465,6 +2467,44 @@ class MusicScannerWithTasks(tk.Tk):
                         _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=('approx', gtag))
                     else:
                         _insert(right, right_counter, None, None, tags=('approx', gtag))
+        elif vt == 'agg':
+            # 聚合去重视图：重复 + 相似 + 近似 依次显示，每组前插入类型分隔行
+            sections = (
+                ('dup', '── 重复文件 ──', self.duplicate_groups),
+                ('sim', '── 相似文件 ──', self.similar_groups),
+                ('approx', '── 近似文件 ──', self.approximate_groups),
+            )
+            for tag_name, header_text, group_list in sections:
+                if not group_list:
+                    continue
+                # 类型分隔行（左右两侧同步插入，不可勾选）
+                for tree in (left, right):
+                    counter = left_counter if tree is left else right_counter
+                    tree.insert('', tk.END, text='',
+                                values=(_fmt_no(counter), header_text, '', '', '', ''),
+                                tags=('group_header',))
+                for gi, group in enumerate(group_list):
+                    a_items = [(p, i) for p, i in group if p in self.all_files_a]
+                    b_items = [(p, i) for p, i in group if p in self.all_files_b]
+                    # 单侧去重过滤仅对相似/近似组生效（重复组不受影响）
+                    if tag_name != 'dup':
+                        if not self.smart_single_side.get():
+                            if not a_items or not b_items or len(a_items) != len(b_items):
+                                continue
+                        else:
+                            if a_items and b_items and len(a_items) == len(b_items):
+                                continue
+                    max_len = max(len(a_items), len(b_items))
+                    gtag = GROUP_TAGS[gi % 2]
+                    for i in range(max_len):
+                        if i < len(a_items):
+                            _insert(left, left_counter, a_items[i][0], a_items[i][1], tags=(tag_name, gtag))
+                        else:
+                            _insert(left, left_counter, None, None, tags=(tag_name, gtag))
+                        if i < len(b_items):
+                            _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=(tag_name, gtag))
+                        else:
+                            _insert(right, right_counter, None, None, tags=(tag_name, gtag))
         elif vt == 'chg':
             a_changes = [c for c in self.change_results if c.folder_type == 'A']
             b_changes = [c for c in self.change_results if c.folder_type == 'B']
@@ -2645,6 +2685,9 @@ class MusicScannerWithTasks(tk.Tk):
         elif result_type == 'approx':
             self.switch_result_view('approx')
             target = self.result_tree_a if folder == 'A' else self.result_tree_b
+        elif result_type == 'agg':
+            self.switch_result_view('agg')
+            target = self.result_tree_a if folder == 'A' else self.result_tree_b
         else:
             return
 
@@ -2680,8 +2723,13 @@ class MusicScannerWithTasks(tk.Tk):
         vt = self.result_view_type
         if vt == 'sim':
             groups = self.similar_groups
+            dup_len = 0
         elif vt == 'approx':
             groups = self.approximate_groups
+            dup_len = 0
+        elif vt == 'agg':
+            dup_len = len(self.duplicate_groups)
+            groups = self.duplicate_groups + self.similar_groups + self.approximate_groups
         else:
             return  # 'all' 或 'dup' 时不操作
 
@@ -2708,19 +2756,20 @@ class MusicScannerWithTasks(tk.Tk):
                     self._set_checked_tag(tree, item, False)
 
         checked_paths = set()
-        for group in groups:
+        for gi, group in enumerate(groups):
             a_items = [(p, i) for p, i in group if p in self.all_files_a]
             b_items = [(p, i) for p, i in group if p in self.all_files_b]
             all_items = a_items + b_items
             if not all_items:
                 continue
-            # 单侧去重：不勾选→仅处理两侧数量相等的组；勾选→仅处理数量不等的组
-            if not self.smart_single_side.get():
-                if not a_items or not b_items or len(a_items) != len(b_items):
-                    continue
-            else:
-                if a_items and b_items and len(a_items) == len(b_items):
-                    continue
+            # 单侧去重：仅对相似/近似组生效（聚合视图下重复组不受影响）
+            if gi >= dup_len:
+                if not self.smart_single_side.get():
+                    if not a_items or not b_items or len(a_items) != len(b_items):
+                        continue
+                else:
+                    if a_items and b_items and len(a_items) == len(b_items):
+                        continue
 
             # 权重：伴奏版优先 > 时长最大 > 文件最大 > 文件最新
             # 候选列表，逐步缩小范围
@@ -3119,8 +3168,8 @@ class MusicScannerWithTasks(tk.Tk):
     def _run_ai_analysis(self):
         """运行 AI 分析：将当前视图分组发送到 AI 判断是否为同一首歌"""
         vt = self.result_view_type
-        if vt not in ('sim', 'approx'):
-            messagebox.showinfo("提示", "请在相似文件或近似文件视图下使用 AI 分析")
+        if vt not in ('sim', 'approx', 'agg'):
+            messagebox.showinfo("提示", "请在相似文件、近似文件或聚合去重视图下使用 AI 分析")
             return
 
         if not self.ai_config.get('endpoint') or not self.ai_config.get('api_key'):
@@ -3129,7 +3178,11 @@ class MusicScannerWithTasks(tk.Tk):
                 self._configure_api()
             return
 
-        groups = self.similar_groups if vt == 'sim' else self.approximate_groups
+        # 聚合视图：只分析相似+近似组（重复文件内容相同无需 AI）
+        if vt == 'agg':
+            groups = self.similar_groups + self.approximate_groups
+        else:
+            groups = self.similar_groups if vt == 'sim' else self.approximate_groups
         if not groups:
             messagebox.showinfo("提示", "当前视图中没有分组数据")
             return
@@ -3188,6 +3241,21 @@ class MusicScannerWithTasks(tk.Tk):
         same_count, diff_count, error_count, checked_paths = self._apply_ai_clusters(
             judgments, groups, vt)
 
+        # 聚合视图：重复组内容完全相同，无需 AI，直接按规则勾选保留最优
+        dup_checked = 0
+        if vt == 'agg' and self.duplicate_groups:
+            for group in self.duplicate_groups:
+                all_items = [(p, i) for p, i in group]
+                if not all_items:
+                    continue
+                keep = self._pick_best_file(all_items)
+                if not keep:
+                    continue
+                for path, _ in all_items:
+                    if path != keep and path not in self.user_feedback:
+                        checked_paths.add(path)
+                        dup_checked += 1
+
         if not checked_paths:
             msg = f"AI 分析了 {total_groups} 组"
             if same_count:
@@ -3220,6 +3288,8 @@ class MusicScannerWithTasks(tk.Tk):
         summary = (f"AI 分析了 {total_groups} 组\n"
                    f"• {same_count} 个同歌组已自动勾选，保留最优文件\n"
                    f"• {diff_count} 个不同歌曲已保留")
+        if vt == 'agg' and dup_checked:
+            summary += f"\n• 重复文件组已按规则勾选 {dup_checked} 个冗余文件"
         if error_count:
             summary += f"\n⚠ {error_count} 批分析失败（可重新运行 AI 分析重试）"
         summary += "\n\n请检查勾选结果后移入回收站"
@@ -3436,7 +3506,7 @@ class MusicScannerWithTasks(tk.Tk):
         vt = self.result_view_type
 
         # 分组视图必须要有 AI 分析结果
-        if vt in ('sim', 'approx') and not self.ai_judgments:
+        if vt in ('sim', 'approx', 'agg') and not self.ai_judgments:
             ret = messagebox.askyesno("无 AI 分析结果",
                 "当前视图尚未运行 AI 分析，导出的数据不会包含 AI 判断。\n\n是否先运行 AI 分析？")
             if ret:
@@ -3458,7 +3528,7 @@ class MusicScannerWithTasks(tk.Tk):
 
         # 获取视图名称和分组数据
         view_names = {'dup': '重复文件', 'sim': '相似文件', 'approx': '近似文件',
-                      'chg': '变更文件', 'all': '全部文件'}
+                      'agg': '聚合去重', 'chg': '变更文件', 'all': '全部文件'}
         view_name = view_names.get(vt, '文件列表')
         groups = []
         if vt == 'dup':
@@ -3467,6 +3537,8 @@ class MusicScannerWithTasks(tk.Tk):
             groups = self.similar_groups
         elif vt == 'approx':
             groups = self.approximate_groups
+        elif vt == 'agg':
+            groups = self.duplicate_groups + self.similar_groups + self.approximate_groups
 
         # 智选规则文本
         rules_text = (
@@ -3498,19 +3570,29 @@ class MusicScannerWithTasks(tk.Tk):
             for gi, group in enumerate(groups):
                 gno = f"G{gi + 1}"
 
-                # 查找 AI 聚类结果
+                # 查找 AI 聚类结果（聚合视图下 AI 只分析了相似+近似组，需偏移索引）
                 ai_clusters = None
                 if self.ai_judgments:
-                    for j in self.ai_judgments:
-                        if j.get('group_index') == gi:
-                            ai_clusters = j.get('clusters')
-                            break
+                    if vt == 'agg':
+                        j_gi = gi - len(self.duplicate_groups)
+                        if j_gi < 0:
+                            ai_clusters = None
+                        else:
+                            for j in self.ai_judgments:
+                                if j.get('group_index') == j_gi:
+                                    ai_clusters = j.get('clusters')
+                                    break
+                    else:
+                        for j in self.ai_judgments:
+                            if j.get('group_index') == gi:
+                                ai_clusters = j.get('clusters')
+                                break
 
                 def _pick_keep(group):
                     all_items = [(p, i) for p, i in group]
                     return self._pick_best_file(all_items)
 
-                if ai_clusters and vt in ('sim', 'approx'):
+                if ai_clusters and vt in ('sim', 'approx', 'agg'):
                     # 用 AI 聚类：每个 cluster 内同歌，跨 cluster 不同歌
                     cluster_keep_map = {}
                     for cluster in ai_clusters:
