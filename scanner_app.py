@@ -718,6 +718,16 @@ class MusicScannerWithTasks(tk.Tk):
                     lbl.config(cursor='hand2')
                     lbl.bind('<Button-1>', lambda e, v=view_type: self.switch_result_view(v))
 
+        # 右下角导出按钮（导出当前视图列表为 CSV）
+        btn_frame = tk.Frame(overview_frame, bg=overview_frame.cget('bg'))
+        btn_frame.pack(side=tk.BOTTOM, anchor='e', padx=8, pady=(0, 4))
+        btn_export = tk.Button(btn_frame, text="📄 导出",
+                               command=self._export_list_to_txt,
+                               bg=self.colors['border'], fg=self.colors['text'],
+                               font=('Segoe UI', 9), cursor='hand2', width=10)
+        btn_export.pack()
+        Tooltip(btn_export, "导出当前视图（重复/相似/近似/聚合去重）列表为 CSV 文件")
+
     def _fill_view_switch_panel(self, view_frame):
         """填充视图切换面板（V12：独立成一栏）"""
         container = tk.Frame(view_frame, bg=self.colors['card'])
@@ -3513,10 +3523,12 @@ class MusicScannerWithTasks(tk.Tk):
                 self._run_ai_analysis()
             return
 
-        # 选择保存路径（自动生成文件名）
+        # 选择保存路径（自动生成文件名：视图类型-月-日-两位随机字母）
         now = datetime.now()
         letters = f"{random.choice('abcdefghijklmnopqrstuvwxyz')}{random.choice('abcdefghijklmnopqrstuvwxyz')}"
-        default_name = f"{now.year}-{now.month:02d}-{now.day:02d}-{letters}.csv"
+        export_view_names = {'dup': '重复文件', 'sim': '相似文件', 'approx': '近似文件',
+                             'agg': '聚合去重', 'chg': '变更文件', 'all': '全部文件'}
+        default_name = f"{export_view_names.get(vt, '文件列表')}-{now.month:02d}-{now.day:02d}-{letters}.csv"
         file_path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             initialfile=default_name,
