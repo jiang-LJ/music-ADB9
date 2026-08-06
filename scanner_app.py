@@ -1296,44 +1296,29 @@ class MusicScannerWithTasks(tk.Tk):
                      wraplength=420).pack(fill=tk.BOTH, expand=True, pady=(12, 0))
 
     def _export_mismatch_list(self, parent=None):
-        """导出文件名与标签不一致清单为 CSV（《不一致清单.csv》，保存位置由用户选择）"""
+        """导出文件名与标签不一致清单为 TXT（《不一致清单.txt》，每行一个完整路径，保存位置由用户选择）"""
         mismatches = self._find_tag_filename_mismatches()
         if not mismatches:
             messagebox.showinfo("导出列表", "没有文件名与标签不一致的文件",
                                 parent=parent)
             return
-        default_name = "不一致清单.csv"
+        default_name = "不一致清单.txt"
         file_path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
+            defaultextension=".txt",
             initialfile=default_name,
-            filetypes=[("CSV 文件", "*.csv")],
+            filetypes=[("文本文件", "*.txt")],
             title="导出不一致清单",
             parent=parent,
         )
         if not file_path:
             return
-
-        def _q(val):
-            s = str(val)
-            if ',' in s or '"' in s or '\n' in s:
-                s = '"' + s.replace('"', '""') + '"'
-            return s
-
-        now = datetime.now()
-        lines = [
-            "# 文件名与标签不一致清单",
-            f"# 导出时间: {now.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"# 共 {len(mismatches)} 个文件（标签以 MP3 内嵌标签为准）",
-            "",
-            "文件名,标签标题",
-        ]
-        for name, tag in mismatches:
-            lines.append(f"{_q(name)},{_q(tag)}")
         try:
+            # 每行一个完整路径（正斜杠分隔），无注释
+            lines = [str(path).replace('\\', '/') for path, _, _ in mismatches]
             with open(file_path, 'w', encoding='utf-8-sig') as f:
                 f.write("\n".join(lines))
             messagebox.showinfo("导出成功",
-                                f"已导出 {len(mismatches)} 个文件到:\n{file_path}",
+                                f"已导出 {len(lines)} 个文件到:\n{file_path}",
                                 parent=parent)
         except Exception as e:
             messagebox.showerror("导出失败", str(e), parent=parent)
@@ -3672,14 +3657,14 @@ class MusicScannerWithTasks(tk.Tk):
                 if tag_key is None:
                     continue  # 标签不可用不比较
                 if file_key != tag_key:
-                    mismatches.append((name, tag_title.strip()))
+                    mismatches.append((path, name, tag_title.strip()))
         return mismatches
 
     def _format_mismatch_text(self, mismatches: list) -> str:
         """生成标签不一致提示文本（数量 + 前 5 个示例）"""
         total = len(mismatches)
         lines = [f"⚠ {total} 个文件文件名与标签不一致（可能影响 AI 去重判断）："]
-        for name, tag in mismatches[:5]:
+        for _, name, tag in mismatches[:5]:
             lines.append(f"  • {name}  →  标签: {tag}")
         if total > 5:
             lines.append(f"  …等 {total} 个，请用 Mp3tag 修正标签")
