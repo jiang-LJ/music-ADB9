@@ -3982,9 +3982,15 @@ class MusicScannerWithTasks(tk.Tk):
 
         tk.Button(btn_bar, text="全选", command=_select_all, **btn_cfg).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_bar, text="反选", command=_invert_sel, **btn_cfg).pack(side=tk.LEFT, padx=2)
+        # 右侧：移动到 → 删除 → 重命名（从左到右）
         tk.Button(btn_bar, text="重命名", command=self._do_rename,
                   bg='#f59e0b', fg='white', font=('Segoe UI', 10, 'bold'),
                   cursor='hand2').pack(side=tk.RIGHT, padx=2)
+        tk.Button(btn_bar, text="删除", command=self._delete_selected_files,
+                  bg='#ef4444', fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.RIGHT, padx=2)
+        tk.Button(btn_bar, text="移动到", command=self._move_selected_files,
+                  **btn_cfg).pack(side=tk.RIGHT, padx=2)
 
         def _show_rename():
             restore_frame.pack_forget()
@@ -4117,6 +4123,128 @@ class MusicScannerWithTasks(tk.Tk):
         dlg.protocol('WM_DELETE_WINDOW', lambda: _pick('abort'))
         dlg.wait_window()
         return result['action'], result['name']
+
+    def _move_selected_files(self):
+        """把勾选的重命名文件移动到所选目录（同名自动加后缀），从列表移除并计数"""
+        dlg = getattr(self, '_rename_dialog', None)
+        lb = getattr(self, '_rename_listbox', None)
+        plan = getattr(self, '_rename_plan', [])
+        if lb is None or plan is None:
+            return
+        sel = lb.curselection()
+        if not sel:
+            messagebox.showinfo("提示", "请先勾选要移动的文件", parent=dlg)
+            return
+        target_dir = filedialog.askdirectory(title="选择移动目标文件夹", parent=dlg)
+        if not target_dir:
+            return
+        ok = messagebox.askyesno(
+            "移动确认",
+            f"确定将 {len(sel)} 个文件移动到:\n{target_dir}？\n\n"
+            "（目标同名文件自动加 (1)(2) 后缀）",
+            parent=dlg)
+        if not ok:
+            return
+
+        done = 0
+        failed = []
+        done_idx = []
+        for idx in sel:
+            if idx >= len(plan):
+                continue
+            path, old_name, _, _ = plan[idx]
+            try:
+                if not os.path.exists(path):
+                    failed.append((old_name, '文件不存在'))
+                    continue
+                dest = os.path.join(target_dir, os.path.basename(path))
+                base, ext = os.path.splitext(dest)
+                n = 1
+                while os.path.exists(dest):
+                    dest = f"{base}({n}){ext}"
+                    n += 1
+                shutil.move(path, dest)
+                done += 1
+                done_idx.append(idx)
+            except Exception as e:
+                failed.append((old_name, str(e)))
+        self._remove_from_rename_list(done_idx, plan, lb)
+        self._rename_dirty = getattr(self, '_rename_dirty', 0) + done
+        if failed:
+            detail = "\n".join(f"• {n}: {err}" for n, err in failed[:8])
+            messagebox.showwarning("部分失败",
+                                   f"成功移动 {done} 个，失败 {len(failed)} 个：\n{detail}",
+                                   parent=dlg)
+        elif done:
+            messagebox.showinfo("移动完成",
+                                f"已移动 {done} 个文件到:\n{target_dir}",
+                                parent=dlg)
+
+    def _delete_selected_files(self):
+        """把勾选的重命名文件移入回收站（二次确认），从列表和扫描结果移除并计数"""
+        dlg = getattr(self, '_rename_dialog', None)
+        lb = getattr(self, '_rename_listbox', None)
+        plan = getattr(self, '_rename_plan', [])
+        if lb is None or plan is None:
+            return
+        sel = lb.curselection()
+        if not sel:
+            messagebox.showinfo("提示", "请先勾选要删除的文件", parent=dlg)
+            return
+        ok = messagebox.askyesno(
+            "删除确认",
+            f"确定将 {len(sel)} 个文件移入回收站？\n\n（可在回收站中还原）",
+            parent=dlg)
+        if not ok:
+            return
+
+        done = 0
+        failed = []
+        done_idx = []
+        for idx in sel:
+            if idx >= len(plan):
+                continue
+            path, old_name, _, _ = plan[idx]
+            try:
+                if send_to_trash([path]):
+                    done += 1
+                    done_idx.append(idx)
+                else:
+                    failed.append((old_name, '移入回收站失败'))
+            except Exception as e:
+                failed.append((old_name, str(e)))
+        # 从内存扫描结果同步移除已删除文件
+        for idx in done_idx:
+            p = plan[idx][0]
+            if p in self.all_files_a:
+                del self.all_files_a[p]
+            if p in self.all_files_b:
+                del self.all_files_b[p]
+        self.overview_vars['rename_pending'].set(str(self._count_rename_pending()))
+        if hasattr(self, 'a_stats_var'):
+            self.a_stats_var.set(f"📀 {len(self.all_files_a)} 个文件")
+        if hasattr(self, 'b_stats_var'):
+            self.b_stats_var.set(f"💿 {len(self.all_files_b)} 个文件")
+        self._remove_from_rename_list(done_idx, plan, lb)
+        self._rename_dirty = getattr(self, '_rename_dirty', 0) + done
+        if failed:
+            detail = "\n".join(f"• {n}: {err}" for n, err in failed[:8])
+            messagebox.showwarning("部分失败",
+                                   f"成功删除 {done} 个，失败 {len(failed)} 个：\n{detail}",
+                                   parent=dlg)
+        elif done:
+            messagebox.showinfo("删除完成",
+                                f"已移入回收站 {done} 个文件",
+                                parent=dlg)
+
+    def _remove_from_rename_list(self, done_idx, plan, lb):
+        """从重命名计划与列表移除已处理项（倒序删除），并刷新计数标签"""
+        for idx in sorted(done_idx, reverse=True):
+            del plan[idx]
+            lb.delete(idx)
+        il = getattr(self, '_rename_info_label', None)
+        if il is not None:
+            il.config(text=f"待重命名: {len(plan)} 个文件（勾选后执行）")
 
     def _do_rename(self):
         """执行勾选的重命名"""
