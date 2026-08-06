@@ -29,6 +29,9 @@ from task_manager import TaskManager
 from scanner_core import find_duplicates, find_similar, find_approximate
 import ai_analyzer
 
+# 超长文件分析默认阈值（字符数）
+_LONG_NAME_THRESHOLD = 60
+
 
 def _generate_blank_ico() -> str:
     """生成一个 1x1 透明 ICO 到系统临时目录，返回路径"""
@@ -3586,13 +3589,17 @@ class MusicScannerWithTasks(tk.Tk):
     # ==================== 文件重命名（待重命名） ====================
 
     def _count_rename_pending(self) -> int:
-        """统计当前任务中文件名不符合命名规范的文件数"""
+        """统计待处理文件数（自动可改 + 人工需确认 + 超长文件，并集去重）"""
         import rename_utils
         count = 0
         for d in (self.all_files_a, self.all_files_b):
             for info in d.values():
                 name = info.get('name', '')
-                if name and rename_utils.should_rename(name):
+                if not name:
+                    continue
+                if (rename_utils.should_rename(name)
+                        or rename_utils.detect_manual_review(name)
+                        or len(name) >= _LONG_NAME_THRESHOLD):
                     count += 1
         return count
 
@@ -3684,7 +3691,7 @@ class MusicScannerWithTasks(tk.Tk):
         top.pack(fill=tk.X, pady=(0, 6))
         tk.Label(top, text="超长阈值（文件名 ≥）", bg=self.colors['card'],
                  fg=self.colors['text'], font=('Segoe UI', 10)).pack(side=tk.LEFT)
-        threshold_var = tk.StringVar(value='60')
+        threshold_var = tk.StringVar(value=str(_LONG_NAME_THRESHOLD))
         thr_entry = tk.Entry(top, textvariable=threshold_var, width=8,
                              font=('Consolas', 10), bg='#d1d5db', fg='#1f2937',
                              highlightthickness=0, justify='center')
