@@ -3684,7 +3684,7 @@ class MusicScannerWithTasks(tk.Tk):
         top.pack(fill=tk.X, pady=(0, 6))
         tk.Label(top, text="超长阈值（文件名 ≥）", bg=self.colors['card'],
                  fg=self.colors['text'], font=('Segoe UI', 10)).pack(side=tk.LEFT)
-        threshold_var = tk.StringVar(value='120')
+        threshold_var = tk.StringVar(value='60')
         thr_entry = tk.Entry(top, textvariable=threshold_var, width=8,
                              font=('Consolas', 10), bg='#d1d5db', fg='#1f2937',
                              highlightthickness=0, justify='center')
