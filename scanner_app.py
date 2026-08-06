@@ -13,7 +13,7 @@ import shutil
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk, filedialog, simpledialog
+from tkinter import messagebox, ttk, filedialog
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -3819,6 +3819,63 @@ class MusicScannerWithTasks(tk.Tk):
         dlg.destroy()
         self._rename_dialog = None
 
+    def _ask_manual_review(self, old_name: str, reason: str, parent):
+        """人工确认单窗：加宽输入框（预填原名）+ 四键（是/否/删除/全部否）
+        返回 (action, new_name)：action ∈ {'yes','no','delete','abort'}"""
+        width = max(80, len(old_name) + 10)
+        w = min(920, max(620, width * 7 + 140))
+        dlg = self._create_dialog("需手动修改", w, 300)
+        frame = tk.Frame(dlg, bg=self.colors['card'])
+        frame.pack(fill=tk.BOTH, expand=True, padx=18, pady=14)
+
+        tk.Label(frame, text="该文件无法自动修复，请手动处理：",
+                 bg=self.colors['card'], fg=self.colors['text'],
+                 font=('Segoe UI', 11, 'bold')).pack(anchor='w')
+        tk.Label(frame, text=f"原因：{reason}",
+                 bg=self.colors['card'], fg=self.colors['accent2'],
+                 font=('Segoe UI', 9)).pack(anchor='w', pady=(2, 8))
+
+        tk.Label(frame, text="文件名（可修改）：",
+                 bg=self.colors['card'], fg=self.colors['text'],
+                 font=('Segoe UI', 9)).pack(anchor='w')
+        entry = tk.Entry(frame, font=('Consolas', 10), width=width,
+                         bg='#d1d5db', fg='#1f2937', highlightthickness=0)
+        entry.insert(0, old_name)
+        entry.pack(fill=tk.X, pady=(2, 4))
+        entry.focus_set()
+        entry.selection_range(0, tk.END)
+
+        btn_bar = tk.Frame(frame, bg=self.colors['card'])
+        btn_bar.pack(fill=tk.X, pady=(12, 0))
+        result = {'action': 'abort', 'name': old_name}
+
+        def _pick(action):
+            if action == 'yes':
+                v = entry.get().strip()
+                if not v:
+                    return  # 空名无效，保持弹窗
+                result['name'] = v
+            result['action'] = action
+            dlg.destroy()
+
+        tk.Button(btn_bar, text="是（应用修改）", command=lambda: _pick('yes'),
+                  bg='#22c55e', fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_bar, text="否（跳过）", command=lambda: _pick('no'),
+                  bg=self.colors['border'], fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_bar, text="删除（移入回收站）", command=lambda: _pick('delete'),
+                  bg='#ef4444', fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_bar, text="全部否（退出）", command=lambda: _pick('abort'),
+                  bg=self.colors['border'], fg='white', font=('Segoe UI', 10, 'bold'),
+                  cursor='hand2').pack(side=tk.LEFT, padx=4)
+
+        entry.bind('<Return>', lambda e: _pick('yes'))
+        dlg.protocol('WM_DELETE_WINDOW', lambda: _pick('abort'))
+        dlg.wait_window()
+        return result['action'], result['name']
+
     def _do_rename(self):
         """执行勾选的重命名"""
         dlg = getattr(self, '_rename_dialog', None)
@@ -3856,7 +3913,7 @@ class MusicScannerWithTasks(tk.Tk):
                 done_idx.append(idx)
             except Exception as e:
                 failed.append((old_name, str(e)))
-        # 第二阶段：需人工的文件逐个弹窗确认
+        # 第二阶段：需人工的文件逐个弹窗确认（单窗四键 + 加宽输入框）
         import rename_utils
         for idx in sel:
             if idx >= len(plan):
@@ -3864,21 +3921,23 @@ class MusicScannerWithTasks(tk.Tk):
             old_path, old_name, new_name, reason = plan[idx]
             if not reason:
                 continue
-            resp = messagebox.askyesnocancel(
-                "需手动修改",
-                f"该文件无法自动修复，需要手动输入新文件名：\n\n{old_name}\n\n"
-                f"原因：{reason}\n\n"
-                "[是] 输入新名修改    [否] 跳过该文件    [取消] 全部否，退出处理",
-                parent=dlg)
-            if resp is None:
-                break  # 取消 = 全部否，退出后续人工处理
-            if not resp:
-                continue  # 否 = 跳过该文件
-            new_input = simpledialog.askstring(
-                "手动修改文件名", "请输入新文件名：",
-                initialvalue=old_name, parent=dlg)
-            if not new_input or not new_input.strip():
+            action, new_input = self._ask_manual_review(old_name, reason, dlg)
+            if action == 'abort':
+                break  # 全部否，退出后续人工处理
+            if action == 'no':
+                continue  # 跳过该文件
+            if action == 'delete':
+                # 删除（移入回收站，不确认直接删）
+                try:
+                    if send_to_trash([old_path]):
+                        done += 1
+                        done_idx.append(idx)
+                    else:
+                        failed.append((old_name, '移入回收站失败'))
+                except Exception as e:
+                    failed.append((old_name, str(e)))
                 continue
+            # action == 'yes'：应用输入框新名
             new_input = new_input.strip()
             # 无扩展名时自动补原扩展名
             if '.' not in os.path.basename(new_input) and '.' in old_name:
