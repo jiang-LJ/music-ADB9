@@ -150,6 +150,9 @@ def _unify_multi_artists(artist: str) -> str:
         if key in seen and key not in _KEEP_DUPLICATE_SEGMENTS:
             continue
         seen.add(key)
+        # ① 纯中文歌手名尾部句点清理（张信哲. → 张信哲；eel./CR3./尘ah. 含字母数字不动）
+        if re.fullmatch(r'[\u4e00-\u9fff]+[.．。]', p.strip()):
+            p = p.strip()[:-1]
         kept.append(p)
     artist = ' & '.join([p for p in kept if p])
     # 清理歌手名尾部残留分隔符（多余 " & "、"-"；不删下划线——cici_ 等是合法歌手名）
@@ -276,9 +279,15 @@ def build_new_filename(filename: str) -> str:
         # 2. 多歌手分隔符统一（多空格 → &）+ 歌手名尾部清理
         artist = _unify_multi_artists(artist)
         title = _normalize_separator_spaces(title)
-        # 2.0 歌名内嵌 .mp3（斩春秋戏腔.mp3.mp3 → 斩春秋戏腔）+ 歌名尾部下划线
+        # 2.0 歌名内嵌 .mp3 + 尾部下划线
         title = re.sub(r'\.mp3\b', '', title, flags=re.IGNORECASE)
         title = re.sub(r'_+$', '', title)
+        # ③ 歌名开头单个下划线删除（_R → R；____ You 多下划线不动）
+        title = re.sub(r'^_(?!_)', '', title)
+        # ④ 中文歌名中间 _ → 空格（你好_再见 → 你好 再见；英文/其他语言不动）
+        title = re.sub(r'(?<=[\u4e00-\u9fff])_(?=[\u4e00-\u9fff])', ' ', title)
+        # ② 副本后缀 (1)-(9) 移除（张学友 - 情人 (Live)(1) → 情人 (Live)；DJ (23) 两位数字不动）
+        title = re.sub(r'\s*\(([1-9])\)\s*$', '', title)
         # 2.1 序号前缀（18. / 02- 等开头数字序号）
         title = re.sub(r'^\s*\d{1,3}\s*[.、\-]\s*', '', title)
         # 2.2 歌手名重复：歌名以「歌手 - 」开头（Carly Rae Jepsen - Carly Rae Jepsen - Call Me Maybe）

@@ -135,7 +135,31 @@ class TestAdvancedCleanup:
     def test_underscore_artist_kept(self):
         """cici_ 等以下划线结尾的合法歌手名不应被删下划线"""
         assert build_new_filename('cici_ - 越来越不懂.m4a') == 'cici_ - 越来越不懂.m4a'
-        assert build_new_filename('相依为命_ - _R.mp3') == '相依为命_ - _R.mp3'
+        # 歌名开头单个下划线删除（③），歌手名尾部下划线保留
+        assert build_new_filename('相依为命_ - _R.mp3') == '相依为命_ - R.mp3'
+        assert build_new_filename('相依为命_ - _陈小春.m4a') == '相依为命_ - 陈小春.m4a'
+
+    def test_copy_suffix_removed(self):
+        """② 副本后缀 (1)-(9) 移除；两位数字 DJ (23) 不动"""
+        assert build_new_filename('张学友 - 情人 (Live)(1).mp3') == '张学友 - 情人 (Live).mp3'
+        assert build_new_filename('山水 - DJ (23).mp3') == '山水 - DJ (23).mp3'
+        assert build_new_filename('王菲 - 红豆(2022).mp3') == '王菲 - 红豆(2022).mp3'
+
+    def test_cn_artist_trailing_dot(self):
+        """① 纯中文歌手名尾部句点删除；含字母数字的艺名不动"""
+        assert build_new_filename('张信哲. & 夏蔓蔓 - 不要对他说.mp3') == \
+            '张信哲 & 夏蔓蔓 - 不要对他说.mp3'
+        assert build_new_filename('开阳. - 一点点(星星摇).mp3') == '开阳 - 一点点(星星摇).mp3'
+        assert build_new_filename('eel. - yellow.mp3') == 'eel. - yellow.mp3'
+        assert build_new_filename('CR3. - 去年夏天.m4a') == 'CR3. - 去年夏天.m4a'
+        assert build_new_filename('尘ah. - 云与海.m4a') == '尘ah. - 云与海.m4a'
+
+    def test_cn_underscore_to_space(self):
+        """④ 中文歌名中间 _ → 空格；英文/其他语言不动"""
+        assert build_new_filename('白菜菜QAQ - 你好_再见 (来自星星的你 OST).mp3') == \
+            '白菜菜QAQ - 你好 再见 (来自星星的你 OST).mp3'
+        assert build_new_filename('C418 - stranger_think.mp3') == 'C418 - stranger_think.mp3'
+        assert build_new_filename('CeeLo Green - ____ You.mp3') == 'CeeLo Green - ____ You.mp3'
 
     def test_semicolon_artists(self):
         assert build_new_filename('A1 TRIP;Nick.Y;云推荐 - butterfly.mp3') == \
