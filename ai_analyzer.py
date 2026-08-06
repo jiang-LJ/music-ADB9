@@ -23,6 +23,22 @@ BATCH_SIZE = 20
 # 常见不可用标签值（空值、Track编号、"未知"等）
 _UNUSABLE_TAGS = {'', 'unknown', 'untitled', 'track', '无标题', '未知', '未命名'}
 
+# 常见繁→简映射（音频文件名/标题常用字）
+_TC_TO_SC = str.maketrans({
+    '來': '来', '裏': '里', '裡': '里', '妳': '你', '爲': '为', '與': '与',
+    '無': '无', '們': '们', '個': '个', '這': '这', '後': '后', '發': '发',
+    '於': '于', '愛': '爱', '說': '说', '時': '时', '間': '间', '會': '会',
+    '還': '还', '學': '学', '電': '电', '頭': '头', '點': '点', '幾': '几',
+    '氣': '气', '從': '从', '對': '对', '讓': '让', '夢': '梦', '離': '离',
+    '變': '变', '聽': '听', '親': '亲', '舊': '旧', '東': '东', '樂': '乐',
+})
+
+# 末尾版本说明词（归一为同歌；不含"伴奏"——伴奏版单独保留）
+_VERSION_SUFFIXES = (
+    '新版', '独唱版', '合唱版', '完整版', '现场版',
+    'dj版', 'remix版', 'dj', 'remix', 'live', 'acoustic', 'unplugged',
+)
+
 
 def _extract_title_key(name: str) -> Optional[str]:
     """
@@ -59,18 +75,54 @@ def _extract_title_key(name: str) -> Optional[str]:
 
 def _normalize_title(title: str, full_name: str = '') -> str:
     """
-    规范化歌曲名：去除末尾括号内容、去除末尾纯数字、转小写。
-    含"伴奏"的追加 __acc 后缀，与原件区分。
+    规范化歌曲名：繁→简、去除末尾括号内容、标点统一、去除末尾纯数字、
+    去除末尾版本词（新版/独唱版/DJ版等）。
+    含"伴奏"的追加 __acc 后缀，与原版区分开。
     """
     title = title.strip().lower()
+    # 繁→简
+    title = title.translate(_TC_TO_SC)
     # 去除末尾括号内容，如 (Explicit)、(片刻)、（伴奏）等
     title = re.sub(r'\s*[（(][^）)]*[）)]$', '', title).strip()
+    # 标点统一：. ・ _ 视为空格分隔（如 "何故.何苦.何必" == "何故 何苦 何必"）
+    title = re.sub(r'[.・_／]', ' ', title)
+    title = re.sub(r'\s+', ' ', title).strip()
     # 去除末尾纯数字（如 "See You Again 1" → "See You Again"）
     title = re.sub(r'\s+\d+$', '', title).strip()
+    # 去除末尾版本词（如 "房间-新版" → "房间"、"喜欢你 live" → "喜欢你"）
+    for suffix in _VERSION_SUFFIXES:
+        if title.endswith(suffix):
+            title = title[:-len(suffix)].strip()
+            break
+    # 清理版本词去除后可能残留的尾部短横/下划线（如 "房间-" → "房间"）
+    title = title.rstrip(' -_').strip()
     # 含"伴奏"的标记为不同 key
     if '伴奏' in full_name:
         title += '__acc'
     return title
+
+
+def get_file_title_key(path: str, info: dict, file_tags: Dict[str, dict]) -> Optional[str]:
+    """
+    获取单个文件的歌曲名 key（用于预聚类与指纹验证复用）。
+    优先 ID3 标题标签（做可用性检查后同样归一化），fallback 文件名提取。
+    无法提取时返回 None。
+    """
+    tags = file_tags.get(path, {})
+    name = info.get('name', '')
+    tag_val = tags.get('title')
+    if tag_val and tag_val.strip():
+        tv = tag_val.strip().lower()
+        tag_usable = True
+        if tv in _UNUSABLE_TAGS or len(tv) < 2:
+            tag_usable = False
+        if re.match(r'^(track|曲目|音轨)\s*\d+$', tv):
+            tag_usable = False
+        if re.match(r'^[\d\s\-_./\\#]+$', tv):
+            tag_usable = False
+        if tag_usable:
+            return _normalize_title(tv, name)
+    return _extract_title_key(name)
 
 
 def _precluster_by_filename(group: list, file_tags: Dict[str, dict]) -> Optional[List[List[int]]]:
@@ -86,35 +138,7 @@ def _precluster_by_filename(group: list, file_tags: Dict[str, dict]) -> Optional
     """
     title_keys = {}  # title_key -> list of indices
     for idx, (path, info) in enumerate(group):
-        # 优先用 ID3 标题标签（同样做规范化）
-        tags = file_tags.get(path, {})
-        title_from_tag = tags.get('title')
-        if title_from_tag and title_from_tag.strip():
-            tag_val = title_from_tag.strip().lower()
-            # 检查标签是否可用：排除通用占位值和太短的内容
-            tag_usable = True
-            if tag_val in _UNUSABLE_TAGS or len(tag_val) < 2:
-                tag_usable = False
-            # 排除 "Track 1", "track01", "曲目 1" 等编号格式
-            if re.match(r'^(track|曲目|音轨)\s*\d+$', tag_val):
-                tag_usable = False
-            # 排除纯数字或纯符号
-            if re.match(r'^[\d\s\-_./\\#]+$', tag_val):
-                tag_usable = False
-
-            if tag_usable:
-                key = tag_val
-                # 同样去除末尾括号内容
-                key = re.sub(r'\s*[（(][^）)]*[）)]$', '', key).strip()
-                name = info.get('name', '')
-                if '伴奏' in name:
-                    key += '__acc'
-                title_keys.setdefault(key, []).append(idx)
-                continue
-        
-        # 标签不可用 → fallback 到文件名提取
-        name = info.get('name', '')
-        key = _extract_title_key(name)
+        key = get_file_title_key(path, info, file_tags)
         if key:
             title_keys.setdefault(key, []).append(idx)
         else:

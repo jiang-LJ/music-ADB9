@@ -3435,6 +3435,7 @@ class MusicScannerWithTasks(tk.Tk):
         fp_dialog.update()
 
         import fingerprint as fp_mod
+        import ai_analyzer as ai_mod
         new_cache = {}  # 存本次新计算的指纹
         verified_count = 0
 
@@ -3449,6 +3450,19 @@ class MusicScannerWithTasks(tk.Tk):
                 new_cache[path] = fp
             return fp
 
+        def _cluster_all_same_title(cluster, group):
+            """cluster 内所有文件歌名 key 是否相同（预聚类同歌则信任歌名，不拆）"""
+            keys = set()
+            for idx in cluster:
+                if idx >= len(group):
+                    return False
+                path, info = group[idx]
+                k = ai_mod.get_file_title_key(path, info, self.file_tags)
+                if k is None:
+                    return False
+                keys.add(k)
+            return len(keys) == 1
+
         for j in judgments:
             gi = j.get('group_index')
             clusters = j.get('clusters', [])
@@ -3458,6 +3472,10 @@ class MusicScannerWithTasks(tk.Tk):
             new_clusters = []
             for cluster in clusters:
                 if len(cluster) < 2:
+                    new_clusters.append(cluster)
+                    continue
+                # 歌名 key 全部相同 → 信任歌名判定（同歌不同版本/格式），跳过指纹拆分
+                if _cluster_all_same_title(cluster, group):
                     new_clusters.append(cluster)
                     continue
                 cluster_paths = [group[idx][0] for idx in cluster if idx < len(group)]
