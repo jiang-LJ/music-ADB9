@@ -176,6 +176,57 @@ class TestAdvancedCleanup:
         assert build_new_filename('Musicsum - Musicsum - Hello () .mp3') == \
             'Musicsum - Hello.mp3'
 
+    def test_zero_width_chars_cleaned(self):
+        """零宽/不可见字符清理（U+3164、零宽空格等）"""
+        assert build_new_filename('\u3164\u3164 - 世事难两全.mp3') == '世事难两全.mp3'
+        assert build_new_filename('张韶涵\u3164 & \u3164\u3164 - 欧若拉.mp3') == '张韶涵 - 欧若拉.mp3'
+        assert build_new_filename('LINGLING7 & 心病 & 网友锐明\u3164\u3164\u3164 & \u200b\u200b\u2060 - Stressed Out.mp3') == \
+            'LINGLING7 & 心病 & 网友锐明 - Stressed Out.mp3'
+
+    def test_trailing_amp_underscore_cleaned(self):
+        """歌手列表尾部 & _ 占位清理"""
+        assert build_new_filename('Sol3曜槿 & 鸾仟羽 & 桥上 & _ - 黑糖秀主题曲 (feat. 黑涩会美眉).mp3') == \
+            'Sol3曜槿 & 鸾仟羽 & 桥上 - 黑糖秀主题曲 (feat. 黑涩会美眉).mp3'
+
+    def test_title_inner_mp3_removed(self):
+        assert build_new_filename('墨染辞 - 斩春秋戏腔.mp3.mp3') == '墨染辞 - 斩春秋戏腔.mp3'
+
+    def test_html_entity_decoded(self):
+        assert build_new_filename("Girl's Day - &#44592;&#45824;&#54644;.mp3") == "Girl's Day - 기대해.mp3"
+
+    def test_title_trailing_underscore_removed(self):
+        assert build_new_filename('Justin Bieber - What Do You Mean_.mp3') == \
+            'Justin Bieber - What Do You Mean.mp3'
+        assert build_new_filename('Black Eyed Peas - Where Is The Love_.mp3') == \
+            'Black Eyed Peas - Where Is The Love.mp3'
+
+    def test_artist_duplicate_segment_merged(self):
+        """歌手段完全重复去重（& 内重复段）"""
+        assert build_new_filename('李荣浩 & 李荣浩 - 李白;李白.mp3') == '李荣浩 - 李白;李白.mp3'
+        assert build_new_filename('小表哥 & 小表哥 - 土耳其舞蹈.mp3') == '小表哥 - 土耳其舞蹈.mp3'
+        assert build_new_filename('VaSka & VaSka & 品味 - DJ Antoine-Arabian Adventure(CaSsie VaSka 品味 remix).mp3') == \
+            'VaSka & 品味 - DJ Antoine-Arabian Adventure(CaSsie VaSka 品味 remix).mp3'
+        assert build_new_filename('AhmaTjan Sahra & Dilyar official & Dilyar official - Plain Jene.mp3') == \
+            'AhmaTjan Sahra & Dilyar official - Plain Jene.mp3'
+        assert build_new_filename('Vince Giordano & The Nighthawks & Vince Giordano & Nighthawks Orchestra - Manhattan.mp3') == \
+            'Vince Giordano & The Nighthawks & Nighthawks Orchestra - Manhattan.mp3'
+
+    def test_artist_duplicate_ww_kept(self):
+        """W&W 是真实组合名，重复段必须保留"""
+        assert build_new_filename('W & W & AXMO & Sonja - Rave Love.mp3') == \
+            'W & W & AXMO & Sonja - Rave Love.mp3'
+        assert build_new_filename('W & W & Kizuna AI - The Light.mp3') == \
+            'W & W & Kizuna AI - The Light.mp3'
+        assert build_new_filename('W & W & Nicky Romero - Ups & Downs.mp3') == \
+            'W & W & Nicky Romero - Ups & Downs.mp3'
+
+    def test_amp_dash_with_multi_artist(self):
+        """MissGoog & - 薛之谦 → & 是连接符；张韶涵ㅤ & ㅤㅤ - 欧若拉 → & 是多余末尾符"""
+        assert build_new_filename('MissGoog & - 薛之谦 - 雪落.mp3') == 'MissGoog & 薛之谦 - 雪落.mp3'
+        assert build_new_filename('ALen & 陈小春 & - 街角的晚风(奥语版).mp3') == \
+            'ALen & 陈小春 - 街角的晚风(奥语版).mp3'
+        assert build_new_filename('张韶涵\u3164 & \u3164\u3164 - 欧若拉.mp3') == '张韶涵 - 欧若拉.mp3'
+
 
 class TestRenameOnDisk:
     """真实文件重命名/恢复测试（临时目录）"""

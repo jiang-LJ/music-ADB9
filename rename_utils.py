@@ -15,13 +15,13 @@ ABD9音乐文件筛查器 - 文件重命名工具模块
 """
 
 import re
+import html
 from typing import Optional, Tuple
 
 # ─────────────────────────── 常量 ───────────────────────────
 
 # 版本词映射表（括号内容小写后查表）
-_VERSION_MAP = {
-    'live': 'Live', 'live版': 'Live', 'live演唱版': 'Live', 'live现场版': 'Live',
+_VERSION_MAP = {    'live': 'Live', 'live版': 'Live', 'live演唱版': 'Live', 'live现场版': 'Live',
     'dj版': 'DJ版', 'dj': 'DJ版', 'dj车载版': 'DJ版', 'dj 车载版': 'DJ版',
     'dj完整版': 'DJ版', 'dj氛围版': 'DJ版', 'dj现场版': 'DJ版',
     'remix': 'Remix', 'remix版': 'Remix',
@@ -36,6 +36,9 @@ _VERSION_MAP = {
     'demo': 'Demo',
     'sped up': 'Sped Up',
 }
+
+# 真实组合名白名单：歌手段重复出现时保留（W&W 是荷兰 DJ 组合，非笔误重复）
+_KEEP_DUPLICATE_SEGMENTS = {'w', 'w&w'}
 
 # Windows 文件名非法字符（不含路径分隔符 / \）
 _ILLEGAL_CHARS = set(':*?"<>|')
@@ -138,8 +141,21 @@ def _unify_multi_artists(artist: str) -> str:
     artist = re.sub(r'\s*-\s*&\s*', ' & ', artist)
     # 压缩多余空格
     artist = _normalize_separator_spaces(artist)
+    # 歌手段完全重复去重（李荣浩 & 李荣浩 → 李荣浩；W&W 等真实组合名白名单保护）
+    parts = [p.strip() for p in artist.split('&')]
+    seen = set()
+    kept = []
+    for p in parts:
+        key = p.strip().lower()
+        if key in seen and key not in _KEEP_DUPLICATE_SEGMENTS:
+            continue
+        seen.add(key)
+        kept.append(p)
+    artist = ' & '.join([p for p in kept if p])
     # 清理歌手名尾部残留分隔符（多余 " & "、"-"；不删下划线——cici_ 等是合法歌手名）
     artist = re.sub(r'(?:\s*&\s*)+$', '', artist)
+    # 尾部独立 "_" 占位歌手（Sol3... & _ → 删 " & _"；cici_ 这类不删）
+    artist = re.sub(r'\s*&\s*_+\s*$', '', artist)
     artist = re.sub(r'-\s*$', '', artist)
     artist = artist.strip()
     return artist
@@ -233,11 +249,24 @@ def build_new_filename(filename: str) -> str:
     else:
         stem, ext = filename[:dot], filename[dot:]
 
+    # 0. 清理零宽/不可见字符（U+3164 韩文填充、零宽空格/连字符、不可见数学运算符、BOM、软连字符等）
+    stem = re.sub(r'[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff\u00ad\u3164\u180e\u061c]', '', stem)
+    # 清理后若歌手为空（如 "ㅤㅤ - 歌名" → " - 歌名"），去掉开头的分隔符
+    stem = re.sub(r'^\s*-\s*', '', stem)
+    # 0.5 HTML 实体解码（&#44592;&#45824;&#54644; → 기대해）
+    stem = html.unescape(stem)
+
     # 修复 "& -" 相邻：前面已有 & → "&" 是多余末尾符、"-" 是主分隔符；
-    # 前面无 & → "&" 是歌手连接符、"-" 多余（如 MissGoog & - 薛之谦 → MissGoog & 薛之谦）
+    # 前面无 & 但 "-" 后还有歌手-歌名（如 MissGoog & - 薛之谦 - 雪落）→ "&" 是连接符、"-" 多余；
+    # 前面无 & 且 "-" 后直接是歌名（如 张韶涵ㅤ & ㅤㅤ - 欧若拉）→ "&" 是多余末尾符
     def _fix_amp_dash(m):
         prefix = m.string[:m.start()]
-        return ' - ' if '&' in prefix else ' & '
+        rest = m.string[m.end():]
+        if '&' in prefix:
+            return ' - '
+        if ' - ' in rest:
+            return ' & '
+        return ' - '
     stem = re.sub(r'\s*&\s*-\s*', _fix_amp_dash, stem)
 
     # 1. 拆分 歌手 - 歌名（正则容忍多空格分隔符）
@@ -247,6 +276,9 @@ def build_new_filename(filename: str) -> str:
         # 2. 多歌手分隔符统一（多空格 → &）+ 歌手名尾部清理
         artist = _unify_multi_artists(artist)
         title = _normalize_separator_spaces(title)
+        # 2.0 歌名内嵌 .mp3（斩春秋戏腔.mp3.mp3 → 斩春秋戏腔）+ 歌名尾部下划线
+        title = re.sub(r'\.mp3\b', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'_+$', '', title)
         # 2.1 序号前缀（18. / 02- 等开头数字序号）
         title = re.sub(r'^\s*\d{1,3}\s*[.、\-]\s*', '', title)
         # 2.2 歌手名重复：歌名以「歌手 - 」开头（Carly Rae Jepsen - Carly Rae Jepsen - Call Me Maybe）
