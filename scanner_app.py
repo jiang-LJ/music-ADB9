@@ -1254,40 +1254,36 @@ class MusicScannerWithTasks(tk.Tk):
         toast.after(duration, toast.destroy)
 
     def show_scan_result_dialog(self, message: str, extra_text: str = ''):
-        """显示扫描结果弹窗（固定宽高比，避免正方形）；extra_text 为附加诊断提示"""
-        h = 400 if extra_text else 240
-        dialog = self._create_dialog("扫描结果", 380, h)
+        """显示扫描结果弹窗（统一白色字体；extra_text 为附加诊断提示）"""
+        h = 480 if extra_text else 330
+        dialog = self._create_dialog("扫描结果", 460, h)
         dialog.resizable(False, False)
 
-        # 主内容区（横向：左侧数据 + 右侧按钮）
+        # 主内容区（纵向：上方文本 + 底部按钮）
         main_frame = tk.Frame(dialog, bg=self.colors['card'])
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
 
-        # 左侧：图标 + 数据
-        left = tk.Frame(main_frame, bg=self.colors['card'])
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # 上方：图标 + 数据 + 诊断
+        top = tk.Frame(main_frame, bg=self.colors['card'])
+        top.pack(fill=tk.BOTH, expand=True)
 
-        icon_lbl = tk.Label(left, text="ℹ", bg=self.colors['card'], fg='#0ea5e9',
-                            font=('Segoe UI', 32))
-        icon_lbl.pack(anchor='w')
+        tk.Label(top, text="ℹ", bg=self.colors['card'], fg='white',
+                 font=('Segoe UI', 20)).pack(anchor='w')
 
-        tk.Label(left, text=message, bg=self.colors['card'], fg=self.colors['text'],
+        tk.Label(top, text=message, bg=self.colors['card'], fg='white',
                  font=('Segoe UI', 11), justify=tk.LEFT, anchor='nw').pack(
-                     fill=tk.BOTH, expand=True, pady=(8, 0))
+                     fill=tk.BOTH, expand=True, pady=(10, 0))
 
         if extra_text:
-            tk.Label(left, text=extra_text, bg=self.colors['card'], fg='#b45309',
-                     font=('Segoe UI', 9), justify=tk.LEFT, anchor='nw',
-                     wraplength=330).pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+            tk.Label(top, text=extra_text, bg=self.colors['card'], fg='white',
+                     font=('Segoe UI', 11), justify=tk.LEFT, anchor='nw',
+                     wraplength=420).pack(fill=tk.BOTH, expand=True, pady=(12, 0))
 
-        # 右侧：确定按钮（偏下）
-        right = tk.Frame(main_frame, bg=self.colors['card'])
-        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
-
-        tk.Button(right, text="确定", command=dialog.destroy,
-                  bg=self.colors['border'], fg=self.colors['text'],
-                  font=('Segoe UI', 10), cursor='hand2', width=10).pack(
-                      side=tk.BOTTOM, pady=(0, 10))
+        # 底部：确定按钮（居中，完整显示）
+        tk.Button(main_frame, text="确定", command=dialog.destroy,
+                  bg=self.colors['border'], fg='white',
+                  font=('Segoe UI', 11), cursor='hand2', width=12).pack(
+                      pady=(14, 0))
 
     # ==================== 扫描选项处理 ====================
 
