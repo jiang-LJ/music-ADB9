@@ -720,12 +720,15 @@ class MusicScannerWithTasks(tk.Tk):
                 for lbl in (text_lbl, num_lbl):
                     Tooltip(lbl, tip)
 
-            # 绑定点击（rename 特殊：打开重命名管理弹窗）
+            # 绑定点击（rename 特殊：切换待重命名视图 + 打开重命名管理弹窗）
             if view_type:
                 for lbl in (dot_lbl, text_lbl, num_lbl):
                     lbl.config(cursor='hand2')
                     if view_type == 'rename':
-                        lbl.bind('<Button-1>', lambda e: self._open_rename_manager())
+                        def _open_rename(e):
+                            self.switch_result_view('rename')
+                            self._open_rename_manager()
+                        lbl.bind('<Button-1>', _open_rename)
                     else:
                         lbl.bind('<Button-1>', lambda e, v=view_type: self.switch_result_view(v))
 
@@ -2539,6 +2542,21 @@ class MusicScannerWithTasks(tk.Tk):
                             _insert(right, right_counter, b_items[i][0], b_items[i][1], tags=(tag_name, gtag))
                         else:
                             _insert(right, right_counter, None, None, tags=(tag_name, gtag))
+        elif vt == 'rename':
+            # 待重命名视图：显示不符合命名规范的文件（旧名 → 新名）
+            import rename_utils
+            for d, tree, counter in ((self.all_files_a, left, left_counter),
+                                     (self.all_files_b, right, right_counter)):
+                for path, info in d.items():
+                    name = info.get('name', '')
+                    if not name:
+                        continue
+                    new_name = rename_utils.build_new_filename(name)
+                    if new_name == name:
+                        continue
+                    info2 = dict(info)
+                    info2['name'] = f"{name} → {new_name}"
+                    _insert(tree, counter, path, info2, tags=('rename',))
         elif vt == 'chg':
             a_changes = [c for c in self.change_results if c.folder_type == 'A']
             b_changes = [c for c in self.change_results if c.folder_type == 'B']
@@ -3582,6 +3600,10 @@ class MusicScannerWithTasks(tk.Tk):
 
     def _open_rename_manager(self):
         """打开重命名管理弹窗（重命名 + 恢复）"""
+        # 打开时重新从磁盘加载重命名日志，保证恢复页与磁盘一致
+        self._load_rename_log()
+        self._rename_dirty = 0  # 本次会话执行的重命名/恢复数（关闭时提示重扫）
+
         dlg = self._create_dialog("重命名管理", 780, 560)
         dlg.transient(self)
         dlg.grab_set()
@@ -3608,6 +3630,7 @@ class MusicScannerWithTasks(tk.Tk):
                               bg=self.colors['card'], fg=self.colors['text'],
                               font=('Segoe UI', 10))
         info_label.pack(anchor='w', padx=10, pady=(2, 4))
+        self._rename_info_label = info_label
 
         list_frame = tk.Frame(rename_frame, bg=self.colors['card'])
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10)
@@ -3651,6 +3674,7 @@ class MusicScannerWithTasks(tk.Tk):
         def _show_restore():
             rename_frame.pack_forget()
             restore_frame.pack(fill=tk.BOTH, expand=True)
+            self._refresh_restore_list()
 
         # ── 恢复页 ──
         restore_frame = tk.Frame(dlg, bg=self.colors['card'])
@@ -3659,6 +3683,7 @@ class MusicScannerWithTasks(tk.Tk):
                                 bg=self.colors['card'], fg=self.colors['text'],
                                 font=('Segoe UI', 10))
         restore_info.pack(anchor='w', padx=10, pady=(2, 4))
+        self._restore_info_label = restore_info
 
         rlist_frame = tk.Frame(restore_frame, bg=self.colors['card'])
         rlist_frame.pack(fill=tk.BOTH, expand=True, padx=10)
@@ -3696,6 +3721,26 @@ class MusicScannerWithTasks(tk.Tk):
         self._rename_plan = plan
         self._rename_listbox = lb
         self._restore_listbox = rlb
+        dlg.protocol('WM_DELETE_WINDOW', self._on_rename_dialog_close)
+
+    def _on_rename_dialog_close(self):
+        """弹窗关闭：若本次执行过重命名/恢复，提示是否重新扫描"""
+        dlg = getattr(self, '_rename_dialog', None)
+        if dlg is None:
+            return
+        dirty = getattr(self, '_rename_dirty', 0)
+        if dirty > 0:
+            ret = messagebox.askyesno("重新扫描",
+                                      f"已重命名/恢复 {dirty} 个文件，\n"
+                                      "是否立即重新扫描以刷新下方列表？",
+                                      parent=dlg)
+            if ret:
+                dlg.destroy()
+                self._rename_dialog = None
+                self.start_scan_with_task()
+                return
+        dlg.destroy()
+        self._rename_dialog = None
 
     def _do_rename(self):
         """执行勾选的重命名"""
@@ -3711,6 +3756,7 @@ class MusicScannerWithTasks(tk.Tk):
 
         done = 0
         failed = []
+        done_idx = []
         for idx in sel:
             if idx >= len(plan):
                 continue
@@ -3727,9 +3773,20 @@ class MusicScannerWithTasks(tk.Tk):
                     'renamed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 })
                 done += 1
+                done_idx.append(idx)
             except Exception as e:
                 failed.append((old_name, str(e)))
         self._save_rename_log()
+
+        # 弹窗内即时刷新：从 plan 和列表移除已处理项（倒序删除保持索引）
+        for idx in sorted(done_idx, reverse=True):
+            del plan[idx]
+            lb.delete(idx)
+        il = getattr(self, '_rename_info_label', None)
+        if il is not None:
+            il.config(text=f"待重命名: {len(plan)} 个文件（勾选后执行）")
+        self._rename_dirty = getattr(self, '_rename_dirty', 0) + done
+        self._refresh_restore_list()
 
         if failed:
             detail = "\n".join(f"• {n}: {err}" for n, err in failed[:10])
@@ -3737,10 +3794,9 @@ class MusicScannerWithTasks(tk.Tk):
                                    f"成功 {done} 个，失败 {len(failed)} 个：\n{detail}",
                                    parent=dlg)
         if done:
-            messagebox.showinfo("重命名完成", f"已重命名 {done} 个文件", parent=dlg)
-            dlg.destroy()
-            # 自动重新扫描当前任务
-            self.start_scan_with_task()
+            messagebox.showinfo("重命名完成",
+                                f"已重命名 {done} 个文件（可继续操作，关闭弹窗后重新扫描刷新）",
+                                parent=dlg)
 
     def _do_restore(self):
         """执行勾选的恢复（新名 → 旧名）"""
@@ -3776,6 +3832,7 @@ class MusicScannerWithTasks(tk.Tk):
                 keep_log.append(entry)
         self.rename_log = keep_log
         self._save_rename_log()
+        self._rename_dirty = getattr(self, '_rename_dirty', 0) + done
 
         if failed:
             detail = "\n".join(f"• {n}: {err}" for n, err in failed[:10])
@@ -3784,12 +3841,23 @@ class MusicScannerWithTasks(tk.Tk):
                                    parent=dlg)
         if done:
             messagebox.showinfo("恢复完成", f"已恢复 {done} 个文件的原名", parent=dlg)
-            rlb.delete(0, tk.END)
-            for e in self.rename_log:
-                old = os.path.basename(e.get('old_path', ''))
-                new = os.path.basename(e.get('new_path', ''))
-                rlb.insert(tk.END, f"{new}  →  {old}")
+            self._refresh_restore_list()
+
+    def _refresh_restore_list(self):
+        """刷新恢复页列表与计数"""
+        rlb = getattr(self, '_restore_listbox', None)
+        if rlb is None:
+            return
+        rlb.delete(0, tk.END)
+        for e in self.rename_log:
+            old = os.path.basename(e.get('old_path', ''))
+            new = os.path.basename(e.get('new_path', ''))
+            rlb.insert(tk.END, f"{new}  →  {old}")
+        if self.rename_log:
             rlb.selection_set(0, tk.END)
+        il = getattr(self, '_restore_info_label', None)
+        if il is not None:
+            il.config(text=f"已重命名: {len(self.rename_log)} 个文件（勾选后恢复原名）")
 
     def _export_ai_rules(self):
         """导出 AI 分析规则文本到文件"""
