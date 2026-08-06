@@ -3414,6 +3414,12 @@ class MusicScannerWithTasks(tk.Tk):
         use_size = self.smart_use_size.get()
         use_mtime = self.smart_use_mtime.get()
 
+        # (1)/(2) 数字后缀副本排最后：优先保留不带副本后缀的原版
+        import rename_utils as _ru
+        non_copy = [(p, i) for p, i in cands if not _ru.is_copy_suffix(i.get('name', ''))]
+        if non_copy:
+            cands = non_copy
+
         # 伴奏版优先
         acc = [(p, i) for p, i in cands if '伴奏' in i.get('name', '')]
         if acc:

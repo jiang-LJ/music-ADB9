@@ -4,7 +4,22 @@
 import os
 import tempfile
 
-from rename_utils import build_new_filename, should_rename
+from rename_utils import build_new_filename, should_rename, is_copy_suffix
+
+
+class TestIsCopySuffix:
+    """数字后缀副本识别"""
+
+    def test_copy_suffix(self):
+        assert is_copy_suffix('王菲 - 红豆(1).mp3') is True
+        assert is_copy_suffix('王菲 - 红豆(12).mp3') is True
+        assert is_copy_suffix('王菲 - 红豆(123).mp3') is True
+
+    def test_not_copy_suffix(self):
+        assert is_copy_suffix('王菲 - 红豆.mp3') is False
+        assert is_copy_suffix('王菲 - 红豆(2022).mp3') is False   # 4位年份
+        assert is_copy_suffix('王菲 - 红豆(1).flac') is True
+        assert is_copy_suffix('红豆(1)') is True
 
 
 class TestBuildNewFilename:

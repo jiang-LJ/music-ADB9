@@ -262,6 +262,15 @@ def build_new_filename(filename: str) -> str:
     return new_name
 
 
+def is_copy_suffix(name: str) -> bool:
+    """
+    判断文件名是否为数字后缀副本（如 红豆(1).mp3、我的歌(2).m4a）。
+    括号内为 1-3 位纯数字（排除 4 位年份如 (2022)）。
+    """
+    base = name.rsplit('.', 1)[0] if '.' in name else name
+    return re.search(r'\(\d{1,3}\)\s*$', base) is not None
+
+
 def should_rename(filename: str) -> bool:
     """判定文件名是否需要重命名"""
     return build_new_filename(filename) != filename
