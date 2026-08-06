@@ -720,9 +720,9 @@ class MusicScannerWithTasks(tk.Tk):
                     lbl.config(cursor='hand2')
                     lbl.bind('<Button-1>', lambda e, v=view_type: self.switch_result_view(v))
 
-        # 右下角导出按钮（导出当前视图列表为 CSV）
+        # 底部居中导出按钮（导出当前视图列表为 CSV）
         btn_frame = tk.Frame(overview_frame, bg=overview_frame.cget('bg'))
-        btn_frame.pack(side=tk.BOTTOM, anchor='e', padx=8, pady=(0, 4))
+        btn_frame.pack(side=tk.BOTTOM, pady=(0, 4))
         btn_export = tk.Button(btn_frame, text="📄 导出",
                                command=self._export_list_to_txt,
                                bg=self.colors['border'], fg=self.colors['text'],
