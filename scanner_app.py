@@ -1267,14 +1267,14 @@ class MusicScannerWithTasks(tk.Tk):
         main_frame = tk.Frame(dialog, bg=self.colors['card'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
 
-        # 顶部：导出列表 + 确定按钮（居中）
+        # 顶部：导出列表 + 移动到按钮（居中）
         btn_row = tk.Frame(main_frame, bg=self.colors['card'])
         btn_row.pack(pady=(0, 10))
         tk.Button(btn_row, text="导出列表", command=lambda: self._export_mismatch_list(dialog),
                   bg=self.colors['border'], fg='white',
                   font=('Segoe UI', 11), cursor='hand2', width=12).pack(
                       side=tk.LEFT, padx=6)
-        tk.Button(btn_row, text="确定", command=dialog.destroy,
+        tk.Button(btn_row, text="移动到", command=lambda: self._move_mismatch_files(dialog),
                   bg=self.colors['border'], fg='white',
                   font=('Segoe UI', 11), cursor='hand2', width=12).pack(
                       side=tk.LEFT, padx=6)
@@ -1322,6 +1322,70 @@ class MusicScannerWithTasks(tk.Tk):
                                 parent=parent)
         except Exception as e:
             messagebox.showerror("导出失败", str(e), parent=parent)
+
+    def _move_mismatch_files(self, parent=None):
+        """把文件名与标签不一致的文件批量移动到用户选择的目录（同名自动加后缀），
+        移动后从扫描结果同步移除并关闭弹窗"""
+        mismatches = self._find_tag_filename_mismatches()
+        if not mismatches:
+            messagebox.showinfo("移动到", "没有文件名与标签不一致的文件",
+                                parent=parent)
+            return
+        target_dir = filedialog.askdirectory(title="选择移动目标文件夹",
+                                             parent=parent)
+        if not target_dir:
+            return
+        ok = messagebox.askyesno(
+            "移动确认",
+            f"确定将 {len(mismatches)} 个文件移动到:\n{target_dir}？\n\n"
+            "（目标同名文件自动加 (1)(2) 后缀）",
+            parent=parent)
+        if not ok:
+            return
+
+        done = 0
+        failed = []
+        moved_paths = []
+        for path, _, _ in mismatches:
+            try:
+                if not os.path.exists(path):
+                    failed.append((path, '文件不存在'))
+                    continue
+                dest = os.path.join(target_dir, os.path.basename(path))
+                base, ext = os.path.splitext(dest)
+                n = 1
+                while os.path.exists(dest):
+                    dest = f"{base}({n}){ext}"
+                    n += 1
+                shutil.move(path, dest)
+                done += 1
+                moved_paths.append(path)
+            except Exception as e:
+                failed.append((path, str(e)))
+
+        # 同步从内存扫描结果移除
+        for p in moved_paths:
+            if p in self.all_files_a:
+                del self.all_files_a[p]
+            if p in self.all_files_b:
+                del self.all_files_b[p]
+        self.overview_vars['rename_pending'].set(str(self._count_rename_pending()))
+        if hasattr(self, 'a_stats_var'):
+            self.a_stats_var.set(f"📀 {len(self.all_files_a)} 个文件")
+        if hasattr(self, 'b_stats_var'):
+            self.b_stats_var.set(f"💿 {len(self.all_files_b)} 个文件")
+
+        if failed:
+            detail = "\n".join(
+                f"• {os.path.basename(p)}: {err}" for p, err in failed[:8])
+            messagebox.showwarning("部分失败",
+                                   f"成功移动 {done} 个，失败 {len(failed)} 个：\n{detail}",
+                                   parent=parent)
+        else:
+            messagebox.showinfo("移动完成",
+                                f"已移动 {done} 个文件到:\n{target_dir}",
+                                parent=parent)
+        parent.destroy()
 
     # ==================== 扫描选项处理 ====================
 
