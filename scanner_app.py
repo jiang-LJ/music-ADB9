@@ -1283,11 +1283,62 @@ class MusicScannerWithTasks(tk.Tk):
                      font=('Segoe UI', 11), justify=tk.LEFT, anchor='nw',
                      wraplength=420).pack(fill=tk.BOTH, expand=True, pady=(12, 0))
 
-        # 底部：确定按钮（居中，完整显示）
-        tk.Button(main_frame, text="确定", command=dialog.destroy,
+        # 底部：导出列表 + 确定按钮（居中，完整显示）
+        btn_row = tk.Frame(main_frame, bg=self.colors['card'])
+        btn_row.pack(pady=(14, 0))
+        tk.Button(btn_row, text="导出列表", command=lambda: self._export_mismatch_list(dialog),
                   bg=self.colors['border'], fg='white',
                   font=('Segoe UI', 11), cursor='hand2', width=12).pack(
-                      pady=(14, 0))
+                      side=tk.LEFT, padx=6)
+        tk.Button(btn_row, text="确定", command=dialog.destroy,
+                  bg=self.colors['border'], fg='white',
+                  font=('Segoe UI', 11), cursor='hand2', width=12).pack(
+                      side=tk.LEFT, padx=6)
+
+    def _export_mismatch_list(self, parent=None):
+        """导出文件名与标签不一致清单为 CSV（不一致列表-月-日-两位随机字母.csv）"""
+        mismatches = self._find_tag_filename_mismatches()
+        if not mismatches:
+            messagebox.showinfo("导出列表", "没有文件名与标签不一致的文件",
+                                parent=parent)
+            return
+        now = datetime.now()
+        letters = (f"{random.choice('abcdefghijklmnopqrstuvwxyz')}"
+                   f"{random.choice('abcdefghijklmnopqrstuvwxyz')}")
+        default_name = f"不一致列表-{now.month:02d}-{now.day:02d}-{letters}.csv"
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            initialfile=default_name,
+            filetypes=[("CSV 文件", "*.csv")],
+            title="导出不一致列表",
+            parent=parent,
+        )
+        if not file_path:
+            return
+
+        def _q(val):
+            s = str(val)
+            if ',' in s or '"' in s or '\n' in s:
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = [
+            "# 文件名与标签不一致清单",
+            f"# 导出时间: {now.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"# 共 {len(mismatches)} 个文件（标签以 MP3 内嵌标签为准）",
+            "",
+            "文件名,标签标题",
+        ]
+        for name, tag in mismatches:
+            lines.append(f"{_q(name)},{_q(tag)}")
+        try:
+            with open(file_path, 'w', encoding='utf-8-sig') as f:
+                f.write("\n".join(lines))
+            messagebox.showinfo("导出成功",
+                                f"已导出 {len(mismatches)} 个文件到:\n{file_path}",
+                                parent=parent)
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e), parent=parent)
 
     # ==================== 扫描选项处理 ====================
 
