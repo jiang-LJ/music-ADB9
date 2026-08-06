@@ -1263,11 +1263,23 @@ class MusicScannerWithTasks(tk.Tk):
         dialog = self._create_dialog("扫描结果", 460, h)
         dialog.resizable(False, False)
 
-        # 主内容区（纵向：上方文本 + 底部按钮）
+        # 主内容区（纵向：顶部按钮 + 下方文本，按钮始终可见）
         main_frame = tk.Frame(dialog, bg=self.colors['card'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
 
-        # 上方：图标 + 数据 + 诊断
+        # 顶部：导出列表 + 确定按钮（居中）
+        btn_row = tk.Frame(main_frame, bg=self.colors['card'])
+        btn_row.pack(pady=(0, 10))
+        tk.Button(btn_row, text="导出列表", command=lambda: self._export_mismatch_list(dialog),
+                  bg=self.colors['border'], fg='white',
+                  font=('Segoe UI', 11), cursor='hand2', width=12).pack(
+                      side=tk.LEFT, padx=6)
+        tk.Button(btn_row, text="确定", command=dialog.destroy,
+                  bg=self.colors['border'], fg='white',
+                  font=('Segoe UI', 11), cursor='hand2', width=12).pack(
+                      side=tk.LEFT, padx=6)
+
+        # 下方：图标 + 数据 + 诊断
         top = tk.Frame(main_frame, bg=self.colors['card'])
         top.pack(fill=tk.BOTH, expand=True)
 
@@ -1282,18 +1294,6 @@ class MusicScannerWithTasks(tk.Tk):
             tk.Label(top, text=extra_text, bg=self.colors['card'], fg='white',
                      font=('Segoe UI', 11), justify=tk.LEFT, anchor='nw',
                      wraplength=420).pack(fill=tk.BOTH, expand=True, pady=(12, 0))
-
-        # 底部：导出列表 + 确定按钮（居中，完整显示）
-        btn_row = tk.Frame(main_frame, bg=self.colors['card'])
-        btn_row.pack(pady=(14, 0))
-        tk.Button(btn_row, text="导出列表", command=lambda: self._export_mismatch_list(dialog),
-                  bg=self.colors['border'], fg='white',
-                  font=('Segoe UI', 11), cursor='hand2', width=12).pack(
-                      side=tk.LEFT, padx=6)
-        tk.Button(btn_row, text="确定", command=dialog.destroy,
-                  bg=self.colors['border'], fg='white',
-                  font=('Segoe UI', 11), cursor='hand2', width=12).pack(
-                      side=tk.LEFT, padx=6)
 
     def _export_mismatch_list(self, parent=None):
         """导出文件名与标签不一致清单为 CSV（《不一致清单.csv》，保存位置由用户选择）"""
