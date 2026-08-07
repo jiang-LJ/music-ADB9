@@ -3919,11 +3919,119 @@ class MusicScannerWithTasks(tk.Tk):
             dlg.destroy()
             self._open_rename_manager()
 
+        # 「调用ai」勾选项（精简命名时是否调用 AI 生成）
+        use_ai_var = tk.BooleanVar(value=False)
+
+        def _shorten_selected():
+            """精简命名：勾选项 → AI 或本地规则生成精简名 → 预览确认 → 重命名"""
+            if not hits:
+                return
+            sel = lb.curselection()
+            if not sel:
+                messagebox.showinfo("提示", "请先勾选要精简命名的文件", parent=dlg)
+                return
+            targets = [hits[i] for i in sel]  # [(path, name)]
+            import rename_utils as _ru
+            # 生成精简名映射
+            mapping = {}
+            if use_ai_var.get() and self.ai_config.get('endpoint') and self.ai_config.get('api_key'):
+                import ai_analyzer as _ai2
+                try:
+                    ai_map = _ai2.shorten_names([n for _, n in targets], self.ai_config)
+                except Exception:
+                    ai_map = {}
+                for p, n in targets:
+                    mapping[n] = ai_map.get(n) or _ru.build_short_filename(n)
+            else:
+                for _, n in targets:
+                    mapping[n] = _ru.build_short_filename(n)
+            # 过滤无变化的
+            plan2 = [(p, n, mapping[n]) for p, n in targets if mapping[n] and mapping[n] != n]
+            if not plan2:
+                messagebox.showinfo("精简命名", "所选文件无需精简（本地规则无变化）", parent=dlg)
+                return
+            # 预览确认弹窗
+            pdlg = self._create_dialog("精简命名预览", 720, 420)
+            pframe = tk.Frame(pdlg, bg=self.colors['card'])
+            pframe.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
+            tk.Label(pframe, text=f"以下 {len(plan2)} 个文件将精简命名：",
+                     bg=self.colors['card'], fg=self.colors['text'],
+                     font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 6))
+            plb = tk.Listbox(pframe, font=('Consolas', 9), bg='#d1d5db', fg='#1f2937',
+                             highlightthickness=0, activestyle='none', selectmode=tk.EXTENDED)
+            psb = tk.Scrollbar(pframe, orient=tk.VERTICAL, command=plb.yview)
+            plb.config(yscrollcommand=psb.set)
+            psb.pack(side=tk.RIGHT, fill=tk.Y)
+            plb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            for p, old, new in plan2:
+                plb.insert(tk.END, f"{old}  →  {new}")
+            plb.selection_set(0, tk.END)
+            pbtn = tk.Frame(pframe, bg=self.colors['card'])
+            pbtn.pack(fill=tk.X, pady=(10, 0))
+
+            def _confirm():
+                s2 = plb.curselection()
+                done2 = 0
+                failed2 = []
+                done_paths = []
+                for i2 in s2:
+                    if i2 >= len(plan2):
+                        continue
+                    path, old, new = plan2[i2]
+                    folder = os.path.dirname(path)
+                    target = self._unique_target_path(folder, new, path)
+                    if target == path:
+                        continue
+                    try:
+                        os.rename(path, target)
+                        self.rename_log.append({
+                            'old_path': path,
+                            'new_path': target,
+                            'renamed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        })
+                        done2 += 1
+                        done_paths.append(path)
+                    except Exception as e:
+                        failed2.append((old, str(e)))
+                self._save_rename_log()
+                self._rename_dirty = getattr(self, '_rename_dirty', 0) + done2
+                pdlg.destroy()
+                # 从超长列表移除已精简文件
+                for path in done_paths:
+                    if path in self.all_files_a:
+                        del self.all_files_a[path]
+                    if path in self.all_files_b:
+                        del self.all_files_b[path]
+                if failed2:
+                    detail = "\n".join(f"• {n}: {err}" for n, err in failed2[:8])
+                    messagebox.showwarning("部分失败",
+                                           f"成功 {done2} 个，失败 {len(failed2)} 个：\n{detail}",
+                                           parent=dlg)
+                elif done2:
+                    messagebox.showinfo("精简完成", f"已精简命名 {done2} 个文件", parent=dlg)
+                else:
+                    messagebox.showinfo("未精简", "没有文件被精简（重名或名称未变化）", parent=dlg)
+                _refresh()
+                if done2:
+                    self.overview_vars['rename_pending'].set(str(self._count_rename_pending()))
+
+            tk.Button(pbtn, text="确认精简", command=_confirm,
+                      bg='#22c55e', fg='white', font=('Segoe UI', 10, 'bold'),
+                      cursor='hand2').pack(side=tk.LEFT, padx=4)
+            tk.Button(pbtn, text="取消", command=pdlg.destroy, **btn_cfg).pack(side=tk.LEFT, padx=4)
+
         btn_cfg = dict(bg=self.colors['border'], fg='white', font=('Segoe UI', 10, 'bold'),
                        cursor='hand2')
-        tk.Button(btn_bar, text="批量删除（移入回收站）", command=_batch_delete,
+        tk.Button(btn_bar, text="批量删除", command=_batch_delete,
                   bg='#ef4444', fg='white', font=('Segoe UI', 10, 'bold'),
                   cursor='hand2').pack(side=tk.LEFT, padx=4)
+        tk.Button(btn_bar, text="精简命名", command=_shorten_selected,
+                  **btn_cfg).pack(side=tk.LEFT, padx=4)
+        tk.Checkbutton(btn_bar, text="调用ai", variable=use_ai_var,
+                       bg=self.colors['card'], fg=self.colors['text'],
+                       selectcolor=self.colors['card'], font=('Segoe UI', 9),
+                       activebackground=self.colors['card'],
+                       activeforeground=self.colors['text']).pack(side=tk.LEFT, padx=4)
         tk.Button(btn_bar, text="下一步（重命名管理）", command=_next,
                   bg='#22c55e', fg='white', font=('Segoe UI', 10, 'bold'),
                   cursor='hand2').pack(side=tk.RIGHT, padx=4)

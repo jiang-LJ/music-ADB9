@@ -379,3 +379,30 @@ def detect_manual_review(filename: str) -> str:
         return '下载残留命名（含日期/ID 串）'
 
     return ''
+
+
+def build_short_filename(filename: str) -> str:
+    """
+    超长文件精简命名（本地规则）：
+    - 压缩多歌手：仅保留前 2 个（A & B & C & D → A & B）
+    - 去副标题：歌名内 " - " 后的部分删除（歌手-歌名-副标题 → 歌手-歌名）
+    - 空格/符号清理（复用 _normalize_separator_spaces）
+    返回精简后的新名；无变化时返回原名。
+    """
+    dot = filename.rfind('.')
+    if dot > 0:
+        stem, ext = filename[:dot], filename[dot:]
+    else:
+        stem, ext = filename, ''
+    if ' - ' in stem:
+        artist, title = stem.split(' - ', 1)
+        # 压缩多歌手：保留前 2 段
+        parts = [p.strip() for p in artist.split('&')]
+        if len(parts) > 2:
+            artist = ' & '.join(parts[:2])
+        # 去副标题：歌名部分按 " - " 再拆，取第一段
+        title_parts = [t.strip() for t in title.split(' - ')]
+        title = title_parts[0]
+        stem = f"{artist} - {title}"
+    stem = _normalize_separator_spaces(stem)
+    return stem + ext

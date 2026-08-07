@@ -448,3 +448,56 @@ def analyze_groups(
         progress_callback(ai_batches, ai_batches, f"分析完成，共处理 {total} 组")
 
     return all_judgments
+
+def shorten_names(names: list, config: dict) -> dict:
+    """
+    调用 AI 为超长文件名生成精简名（超长文件分析窗「精简命名」用）。
+    names: [完整文件名, ...]（含扩展名）
+    返回 {原文件名: 精简文件名}；AI 不可用/失败时返回 {}（调用方兜底本地规则）。
+    """
+    endpoint = config.get('endpoint', '').rstrip('/')
+    api_key = config.get('api_key', '')
+    model = config.get('model', 'gpt-4o-mini')
+    if not endpoint or not api_key or not names:
+        return {}
+
+    system_prompt = (
+        '你是音乐文件命名助手。将超长音乐文件名精简为更短的规范名称，'
+        '必须保持「歌手 - 歌名」格式并保留扩展名。'
+        '精简规则：多歌手只保留前 2 个；删除歌名中的副标题（「-」后的部分）；'
+        '删除冗余信息；不得改变歌名核心；不要乱改歌手名。'
+    )
+    items = [{'id': str(i), 'name': n} for i, n in enumerate(names)]
+    user_prompt = (
+        f'请精简以下 {len(names)} 个文件名：\n{json.dumps(items, ensure_ascii=False)}\n'
+        '返回 JSON（不要包含其它文字）：'
+        '{"results":[{"id":"0","shortened":"歌手 - 歌名(精简).mp3"}, ...]}'
+    )
+    payload = {
+        'model': model,
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt},
+        ],
+        'temperature': 0.1,
+        'response_format': {'type': 'json_object'},
+        'max_tokens': len(names) * 60 + 200,
+    }
+    headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+    try:
+        resp = requests.post(f'{endpoint}/chat/completions', headers=headers, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        content = data['choices'][0]['message']['content']
+        result = json.loads(content)
+        mapping = {}
+        for item in result.get('results', []):
+            try:
+                i = int(item.get('id'))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(names):
+                mapping[names[i]] = item.get('shortened', '')
+        return {k: v for k, v in mapping.items() if v and v != k}
+    except Exception:
+        return {}
