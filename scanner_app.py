@@ -316,6 +316,7 @@ class MusicScannerWithTasks(tk.Tk):
         self.ai_config: dict = {}
         self.file_tags: Dict[str, dict] = {}  # path -> {title, artist}
         self.ai_judgments: Optional[List[dict]] = None  # AI 分析结果（最新）
+        self.ai_analyzed_groups: List[list] = []  # AI 实际分析的组（单侧过滤后，用于导出对齐）
         self.ai_history: List[dict] = []  # AI 分析历史记录
         # 指纹缓存
         self.fingerprint_cache_path = get_app_dir() / "fingerprint_cache.json"
@@ -3354,10 +3355,26 @@ class MusicScannerWithTasks(tk.Tk):
             return
 
         # 聚合视图：只分析相似+近似组（重复文件内容相同无需 AI）
+        # 应用单侧去重过滤：只分析当前视图可见的组（与底部显示一致）
+        def _visible_groups(group_list):
+            out = []
+            for group in group_list:
+                a_items = [(p, i) for p, i in group if p in self.all_files_a]
+                b_items = [(p, i) for p, i in group if p in self.all_files_b]
+                if not self.smart_single_side.get():
+                    if not a_items or not b_items or len(a_items) != len(b_items):
+                        continue
+                else:
+                    if a_items and b_items and len(a_items) == len(b_items):
+                        continue
+                out.append(group)
+            return out
+
         if vt == 'agg':
-            groups = self.similar_groups + self.approximate_groups
+            groups = _visible_groups(self.similar_groups) + _visible_groups(self.approximate_groups)
         else:
-            groups = self.similar_groups if vt == 'sim' else self.approximate_groups
+            raw = self.similar_groups if vt == 'sim' else self.approximate_groups
+            groups = _visible_groups(raw)
         if not groups:
             messagebox.showinfo("提示", "当前视图中没有分组数据")
             return
@@ -3391,6 +3408,7 @@ class MusicScannerWithTasks(tk.Tk):
                 progress_callback=_on_progress
             )
             self.ai_judgments = judgments  # 保存 AI 结果供导出使用
+            self.ai_analyzed_groups = groups  # 保存实际分析的组（过滤后），供导出按引用对齐
             self.ai_history.append({
                 'time': datetime.now().isoformat(),
                 'view': vt,
@@ -4527,21 +4545,17 @@ class MusicScannerWithTasks(tk.Tk):
             for gi, group in enumerate(groups):
                 gno = f"G{gi + 1}"
 
-                # 查找 AI 聚类结果（聚合视图下 AI 只分析了相似+近似组，需偏移索引）
+                # 查找 AI 聚类结果（AI 只分析了单侧过滤后的可见组，按组对象引用对齐）
                 ai_clusters = None
                 if self.ai_judgments:
-                    if vt == 'agg':
-                        j_gi = gi - len(self.duplicate_groups)
-                        if j_gi < 0:
-                            ai_clusters = None
-                        else:
-                            for j in self.ai_judgments:
-                                if j.get('group_index') == j_gi:
-                                    ai_clusters = j.get('clusters')
-                                    break
-                    else:
+                    gi_in_analyzed = -1
+                    for _i, _ag in enumerate(self.ai_analyzed_groups):
+                        if _ag is group:
+                            gi_in_analyzed = _i
+                            break
+                    if gi_in_analyzed >= 0:
                         for j in self.ai_judgments:
-                            if j.get('group_index') == gi:
+                            if j.get('group_index') == gi_in_analyzed:
                                 ai_clusters = j.get('clusters')
                                 break
 
