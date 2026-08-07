@@ -100,6 +100,8 @@ def _normalize_title(title: str, full_name: str = '') -> str:
     title = title.strip().lower()
     # 繁→简
     title = title.translate(_TC_TO_SC)
+    # 【】中文括号 → 半角（配合末尾括号去除：孤单心事【男版】→ 孤单心事）
+    title = title.replace('【', '(').replace('】', ')')
     # 判断独立版本（基于完整文件名的歌名部分，避免歌手名含 DJ 等误判）
     song_part = full_name.split(' - ', 1)[-1] if ' - ' in full_name else full_name
     low_song = song_part.lower()
@@ -110,8 +112,9 @@ def _normalize_title(title: str, full_name: str = '') -> str:
             break
     # 去除末尾括号内容（连续多层），如 (Explicit)、(片刻)、（伴奏）、(Live)(1)
     title = re.sub(r'(?:\s*[（(][^）)]*[）)])+$', '', title).strip()
-    # 标点统一：. ・ _ 视为空格分隔（如 "何故.何苦.何必" == "何故 何苦 何必"）
-    title = re.sub(r'[.・_／]', ' ', title)
+    # 标点统一：. ・ _ , ， ; ； 、 / 视为空格分隔（如 "何故.何苦.何必" == "何故 何苦 何必"；
+    # "Say You, Say Me" == "Say You Say Me"）
+    title = re.sub(r'[.・_／,，;；、]', ' ', title)
     title = re.sub(r'\s+', ' ', title).strip()
     # 去除末尾纯数字（如 "See You Again 1" → "See You Again"）
     title = re.sub(r'\s+\d+$', '', title).strip()
