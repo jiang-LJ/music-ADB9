@@ -3707,7 +3707,7 @@ class MusicScannerWithTasks(tk.Tk):
     # ==================== 文件重命名（待重命名） ====================
 
     def _count_rename_pending(self) -> int:
-        """统计待处理文件数（自动可改 + 人工需确认 + 超长文件，并集去重）"""
+        """统计待处理文件数（自动可改 + 人工需确认，并集去重；超长文件不统计）"""
         import rename_utils
         count = 0
         for d in (self.all_files_a, self.all_files_b):
@@ -3716,8 +3716,7 @@ class MusicScannerWithTasks(tk.Tk):
                 if not name:
                     continue
                 if (rename_utils.should_rename(name)
-                        or rename_utils.detect_manual_review(name)
-                        or len(name) >= _LONG_NAME_THRESHOLD):
+                        or rename_utils.detect_manual_review(name)):
                     count += 1
         return count
 
