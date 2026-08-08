@@ -4,7 +4,7 @@
 import os
 import tempfile
 
-from rename_utils import build_new_filename, should_rename, is_copy_suffix, detect_manual_review
+from rename_utils import build_new_filename, should_rename, is_copy_suffix, detect_manual_review, build_short_filename
 
 
 class TestIsCopySuffix:
@@ -276,6 +276,38 @@ class TestManualReview:
         assert detect_manual_review('Dvorák - 新世界交响曲.mp3') == ''
         assert detect_manual_review('São Paulo - Sampa.mp3') == ''
         assert detect_manual_review('Stevie Wonder - Part-Time Lover.mp3') == ''
+
+
+class TestShortFilename:
+    """build_short_filename：超长文件精简命名"""
+
+    def test_version_year_album_parens_removed(self):
+        assert build_short_filename('张信哲 - 过火 (2005 Version).m4a') == '张信哲 - 过火.m4a'
+        assert build_short_filename('王菲 - 红豆 (Album Version).mp3') == '王菲 - 红豆.mp3'
+        assert build_short_filename('K-391 - Play - Di Young(Remix).m4a') == 'K-391 - Play.m4a'
+
+    def test_collab_parens_kept(self):
+        assert build_short_filename('10y0 - Lemon (翻自 时代少年团).mp3') == \
+            '10y0 - Lemon (翻自 时代少年团).mp3'
+        assert build_short_filename('GUMI - 心做し(Cover GUMI).mp3') == 'GUMI - 心做し(Cover GUMI).mp3'
+
+    def test_classical_localized(self):
+        assert build_short_filename('Herbert von Karajan & Berliner Philharmoniker - Symphony No. 40 in G minor K550 (1996 Digital Remaster) I.Molto allegro.mp3') == \
+            '卡拉扬 & 柏林爱乐乐团 - G小调第40交响曲 K550 I.Molto allegro.mp3'
+        assert build_short_filename('Hilary Hahn - Sonata in E minor K. 304 (300c) - Tempo di Menuetto.mp3') == \
+            'Hilary Hahn - E小调奏鸣曲 K. 304 (300c).mp3'
+        assert build_short_filename('Yann Tiersen - La Valse d\'Amélie.mp3') == \
+            '扬·提尔森 - La Valse d\'Amélie.mp3'
+        assert build_short_filename('Göran Söllscher - Suite in G minor BWV 99606-Gigue.mp3') == \
+            '约兰·索尔谢尔 - G小调组曲 BWV 99606-Gigue.mp3'
+
+    def test_multi_artist_composer_substring(self):
+        assert build_short_filename('James Levine & London Symphony Orchestra & LSO (LSO) - The Barber of Seville - Comic opera in two acts.mp3') == \
+            'James Levine & 伦敦交响乐团 - The Barber of Seville.mp3'
+
+    def test_no_change_when_short_normal(self):
+        assert build_short_filename('王菲 - 红豆.mp3') == '王菲 - 红豆.mp3'
+        assert build_short_filename('伍佰 & China Blue - 夏夜晚风.mp3') == '伍佰 & China Blue - 夏夜晚风.mp3'
 
 
 class TestRenameOnDisk:

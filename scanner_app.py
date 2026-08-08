@@ -4032,6 +4032,40 @@ class MusicScannerWithTasks(tk.Tk):
                        selectcolor=self.colors['card'], font=('Segoe UI', 9),
                        activebackground=self.colors['card'],
                        activeforeground=self.colors['text']).pack(side=tk.LEFT, padx=4)
+
+        def _export_long_list():
+            """导出当前阈值筛出的全部超长文件：路径|文件名|后缀，命名 超长文件名-MM-DD-XX.txt"""
+            if not hits:
+                messagebox.showinfo("提示", "当前没有超长文件可导出", parent=dlg)
+                return
+            now = datetime.now()
+            letters = (f"{random.choice('abcdefghijklmnopqrstuvwxyz')}"
+                       f"{random.choice('abcdefghijklmnopqrstuvwxyz')}")
+            default_name = f"超长文件名-{now.month:02d}-{now.day:02d}-{letters}.txt"
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                initialfile=default_name,
+                filetypes=[("文本文件", "*.txt")],
+                title="导出超长文件列表",
+                parent=dlg,
+            )
+            if not file_path:
+                return
+            lines = []
+            for path, name in hits:
+                ext = os.path.splitext(name)[1]
+                lines.append(f"{str(path).replace('\\\\', '/')}|{name}|{ext}")
+            try:
+                with open(file_path, 'w', encoding='utf-8-sig') as f:
+                    f.write("\n".join(lines))
+                messagebox.showinfo("导出成功",
+                                    f"已导出 {len(lines)} 个超长文件到:\n{file_path}",
+                                    parent=dlg)
+            except Exception as e:
+                messagebox.showerror("导出失败", str(e), parent=dlg)
+
+        tk.Button(btn_bar, text="导出列表", command=_export_long_list,
+                  **btn_cfg).pack(side=tk.LEFT, padx=4)
         tk.Button(btn_bar, text="下一步（重命名管理）", command=_next,
                   bg='#22c55e', fg='white', font=('Segoe UI', 10, 'bold'),
                   cursor='hand2').pack(side=tk.RIGHT, padx=4)

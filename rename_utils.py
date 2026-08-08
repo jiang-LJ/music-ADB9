@@ -381,11 +381,125 @@ def detect_manual_review(filename: str) -> str:
     return ''
 
 
+# 精简命名：版本/专辑类括号内容（删除）；合作/翻唱/古典乐章类保留
+_SHORT_VERSION_PAREN = {
+    'live', 'live版', 'live演唱版', 'live现场版', 'dj版', 'dj', 'dj车载版',
+    'remix', 'original mix', 'radio edit', 'album version', 'single version',
+    'single_lp version', 'lp version', 'clean version', 'explicit',
+    'remaster', 'remastered', 'demo', 'acoustic', 'instrumental',
+    'sped up', 'slowed', 'slowed and reverb', 'phonk', 'reverb',
+}
+# 保留的括号前缀（合作/翻唱/翻奏等）
+_KEEP_PAREN_PREFIX = ('feat', '翻自', 'cover', '原唱', '翻奏', 'featuring', 'with', 'ft')
+
+# 古典曲式词 → 中文（用于曲名中文化）
+_MUSIC_TERMS = {
+    'symphony': '交响曲', 'symphonie': '交响曲', 'concerto': '协奏曲',
+    'sonata': '奏鸣曲', 'suite': '组曲', 'overture': '序曲', 'nocturne': '夜曲',
+    'waltz': '华尔兹', 'prelude': '前奏曲', 'etude': '练习曲', 'requiem': '安魂曲',
+    'serenade': '小夜曲', 'march': '进行曲', 'mazurka': '玛祖卡',
+    'polonaise': '波兰舞曲', 'fantasia': '幻想曲', 'rhapsody': '狂想曲',
+    'ballade': '叙事曲', 'intermezzo': '间奏曲', 'aria': '咏叹调',
+    'cantata': '康塔塔', 'concerto grosso': '大协奏曲', 'variations': '变奏曲',
+}
+# 作曲家/乐团中文名（子串替换，值=中文；顺序无要求，先长后短避免半匹配）
+_CN_COMPOSERS = [
+    ('herbert von karajan', '卡拉扬'), ('karajan', '卡拉扬'),
+    ('yann tiersen', '扬·提尔森'), ('tiersen', '提尔森'),
+    ('edward elgar', '爱德华·埃尔加'), ('elgar', '埃尔加'),
+    ('göran söllscher', '约兰·索尔谢尔'), ('söllscher', '索尔谢尔'),
+    ('neville marriner', '内维尔·马里纳'), ('marriner', '马里纳'),
+    ('leonard bernstein', '伦纳德·伯恩斯坦'), ('bernstein', '伯恩斯坦'),
+    ('mozart', '莫扎特'), ('beethoven', '贝多芬'), ('bach', '巴赫'),
+    ('chopin', '肖邦'), ('schubert', '舒伯特'), ('liszt', '李斯特'),
+    ('tchaikovsky', '柴可夫斯基'), ('rachmaninoff', '拉赫玛尼诺夫'),
+    ('debus', '德彪西'), ('satie', '萨蒂'), ('debussy', '德彪西'),
+    ('vivaldi', '维瓦尔第'), ('handel', '亨德尔'), ('haydn', '海顿'),
+    ('mendelssohn', '门德尔松'), ('brahms', '勃拉姆斯'), ('wagner', '瓦格纳'),
+    ('strauss', '施特劳斯'), ('verdi', '威尔第'), ('puccini', '普契尼'),
+    ('berliner philharmoniker', '柏林爱乐乐团'), ('london symphony orchestra', '伦敦交响乐团'),
+    ('new york philharmonic', '纽约爱乐乐团'), ('vienna philharmonic', '维也纳爱乐乐团'),
+    ('academy of st. martin in the fields', '圣马丁室内乐团'),
+]
+
+
+def _translate_classical_title(title: str) -> str:
+    """古典曲名中文化：命中曲式词时重组「调性+第N+曲式+作品N」，未命中的原文剩余部分保留；未命中返回原文"""
+    t = title.strip()
+    low = t.lower()
+    hit_term = None
+    for word, cn in _MUSIC_TERMS.items():
+        if word in low:
+            hit_term = cn
+            break
+    if not hit_term:
+        return title
+    # 调性：in G minor / in C# major
+    m = re.search(r'\bin\s*([A-Ga-g][#b]?)\s*(major|minor)\b', t)
+    key_cn = ''
+    if m:
+        note = m.group(1).upper()
+        mode = '大调' if m.group(2).lower() == 'major' else '小调'
+        key_cn = f'{note}{mode}'
+    # 编号：No. 40
+    m2 = re.search(r'\bno\.?\s*(\d+)\b', t, re.IGNORECASE)
+    num_cn = f'第{m2.group(1)}' if m2 else ''
+    # 作品号：Op. 67
+    m3 = re.search(r'\bop\.?\s*(\d+)\b', t, re.IGNORECASE)
+    op_cn = f'作品{m3.group(1)}' if m3 else ''
+    # 重组：调性 + 编号 + 曲式 + 作品号（调性在最前，如 G小调第40交响曲）
+    new = f'{key_cn}{num_cn}{hit_term}{op_cn}'
+    # 剩余未命中的原文片段（K550、乐章号等）追加保留
+    rest = re.sub(r'\bin\s*[A-Ga-g][#b]?\s*(?:major|minor)\b', ' ', t, flags=re.IGNORECASE)
+    rest = re.sub(r'\bno\.?\s*\d+\b', ' ', rest, flags=re.IGNORECASE)
+    rest = re.sub(r'\bop\.?\s*\d+\b', ' ', rest, flags=re.IGNORECASE)
+    for word, _cn in _MUSIC_TERMS.items():
+        rest = re.sub(r'\b' + re.escape(word) + r'\b', ' ', rest, flags=re.IGNORECASE)
+    rest = re.sub(r'\s{2,}', ' ', rest).strip(' ,.;-')
+    if rest:
+        new = f'{new} {rest}'
+    return new
+
+
+def _localize_classical(artist: str, title: str):
+    """本地中文化：作曲家/乐团名子串替换（保持多歌手）+ 曲式曲名翻译。返回 (artist, title)。"""
+    a = artist
+    for raw, cn in _CN_COMPOSERS:
+        if re.search(r'\b' + re.escape(raw) + r'\b', a, re.IGNORECASE):
+            a = re.sub(r'\b' + re.escape(raw) + r'\b', cn, a, flags=re.IGNORECASE)
+    nt = _translate_classical_title(title)
+    return a, nt
+
+
+def _strip_version_parens(title: str) -> str:
+    """删除版本/年份/专辑类括号内容（feat./翻自/Cover/古典乐章类保留），删后清理空格。"""
+    def _rep(m):
+        inner = m.group(1).strip()
+        low = inner.lower()
+        # 年份类（4位数字开头）：1996 Digital Remaster / 2005 Version / 2022
+        if re.match(r'^\d{4}\b', low):
+            return ''
+        # 版本/专辑词
+        if low in _SHORT_VERSION_PAREN or low.rstrip('.') in _SHORT_VERSION_PAREN:
+            return ''
+        # 保留合作/翻唱类
+        for pfx in _KEEP_PAREN_PREFIX:
+            if low.startswith(pfx):
+                return m.group(0)
+        return m.group(0)
+    t = re.sub(r'\(([^)]*)\)', _rep, title)
+    t = re.sub(r'\s{2,}', ' ', t).strip()
+    t = re.sub(r'\(\s+', '(', t).replace(' )', ')')
+    return t
+
+
 def build_short_filename(filename: str) -> str:
     """
     超长文件精简命名（本地规则）：
     - 压缩多歌手：仅保留前 2 个（A & B & C & D → A & B）
     - 去副标题：歌名内 " - " 后的部分删除（歌手-歌名-副标题 → 歌手-歌名）
+    - 删除版本/年份/专辑类括号（feat./翻自/古典乐章保留）
+    - 古典曲名中文化（曲式词+作曲家本地对照表，仅中文）
     - 空格/符号清理（复用 _normalize_separator_spaces）
     返回精简后的新名；无变化时返回原名。
     """
@@ -403,6 +517,12 @@ def build_short_filename(filename: str) -> str:
         # 去副标题：歌名部分按 " - " 再拆，取第一段
         title_parts = [t.strip() for t in title.split(' - ')]
         title = title_parts[0]
+        # 删版本/年份/专辑类括号
+        title = _strip_version_parens(title)
+        # 古典曲名中文化（作曲家名 + 曲式翻译）
+        artist, title = _localize_classical(artist, title)
         stem = f"{artist} - {title}"
+    else:
+        stem = _strip_version_parens(stem)
     stem = _normalize_separator_spaces(stem)
     return stem + ext
